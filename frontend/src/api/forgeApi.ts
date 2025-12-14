@@ -101,34 +101,49 @@ export const forgeApi = {
         // Calculate total size for progress tracking
         const totalSize = files.reduce((sum, f) => sum + f.size, 0);
         let uploadedSize = 0;
+        let lastProgressUpdate = 0;
+
+        // Start simulated progress immediately (proxy may delay real progress events)
+        let simulatedProgress = 5;
+        const progressInterval = setInterval(() => {
+            if (onProgress && simulatedProgress < 75) {
+                simulatedProgress += 2;
+                if (simulatedProgress > lastProgressUpdate) {
+                    onProgress(simulatedProgress);
+                }
+            }
+        }, 500);
 
         try {
             console.log(`[UPLOAD] Starting upload of ${files.length} files (${(totalSize / 1024 / 1024).toFixed(2)} MB total)`);
+            
+            // Immediate feedback
+            if (onProgress) onProgress(5);
             
             const res = await apiClient.post('/forge-complete', formData, {
                 timeout: 600000, // 10 minutes for large files
                 maxContentLength: Infinity,
                 maxBodyLength: Infinity,
-                // Let axios set Content-Type automatically with boundary
-                headers: {
-                    // Explicitly do NOT set Content-Type - axios will set it with boundary
-                },
+                headers: {},
                 onUploadProgress: (progressEvent: AxiosProgressEvent) => {
+                    clearInterval(progressInterval); // Stop simulated progress once real progress starts
                     if (progressEvent.total && onProgress) {
-                        // Upload progress: 0-80% (save 20% for analysis)
                         const uploadProgress = (progressEvent.loaded / progressEvent.total) * 80;
                         uploadedSize = progressEvent.loaded;
-                        console.log(`[UPLOAD] Progress: ${uploadProgress.toFixed(1)}% (${(uploadedSize / 1024 / 1024).toFixed(2)} MB / ${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
-                        onProgress(Math.min(uploadProgress, 80));
+                        lastProgressUpdate = Math.min(uploadProgress, 80);
+                        console.log(`[UPLOAD] Progress: ${uploadProgress.toFixed(1)}%`);
+                        onProgress(lastProgressUpdate);
                     } else if (progressEvent.loaded && onProgress) {
-                        // If total is unknown, estimate based on loaded bytes
                         uploadedSize = progressEvent.loaded;
                         const estimatedProgress = Math.min((uploadedSize / (totalSize || 1)) * 80, 80);
-                        console.log(`[UPLOAD] Progress (estimated): ${estimatedProgress.toFixed(1)}% (${(uploadedSize / 1024 / 1024).toFixed(2)} MB / ${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
+                        lastProgressUpdate = estimatedProgress;
+                        console.log(`[UPLOAD] Progress (estimated): ${estimatedProgress.toFixed(1)}%`);
                         onProgress(estimatedProgress);
                     }
                 },
             });
+            
+            clearInterval(progressInterval);
             
             console.log('[UPLOAD] Upload completed successfully');
 
@@ -143,6 +158,7 @@ export const forgeApi = {
 
             return res.data;
         } catch (error: any) {
+            clearInterval(progressInterval);
             // Enhanced error reporting
             if (error.response?.status === 413) {
                 throw new Error('File too large - maximum size exceeded');

@@ -64,7 +64,10 @@ export class LoopForgeAudioEngine {
   
   // CTO-level: Track memory usage for intelligent cleanup
   private bufferMemoryBytes = 0;
-  private readonly maxBufferMemoryBytes = 512 * 1024 * 1024; // 512MB limit
+  private readonly maxBufferMemoryBytes = 1024 * 1024 * 1024; // 1GB limit (modern browsers can handle this)
+  
+  // Protected banks that should never be evicted (currently selected stems)
+  private protectedBanks: Set<string> = new Set();
   
   // Active voices for polyphony management
   private activeVoices: Map<string, AudioBufferSourceNode> = new Map();
@@ -307,16 +310,41 @@ export class LoopForgeAudioEngine {
   }
   
   /**
+   * Protect a bank from eviction (call when selecting a stem)
+   */
+  protectBank(bankId: string): void {
+    this.protectedBanks.add(bankId);
+  }
+  
+  /**
+   * Remove protection from a bank
+   */
+  unprotectBank(bankId: string): void {
+    this.protectedBanks.delete(bankId);
+  }
+  
+  /**
+   * Check if a bank is loaded and ready to play
+   */
+  isBankReady(bankId: string): boolean {
+    return this.sliceBuffers.has(bankId) && !this.loadingPromises.has(bankId);
+  }
+  
+  /**
    * CTO-level: Evict least-recently-used banks if memory pressure is high
+   * Never evicts protected banks (currently selected stems)
    */
   private evictIfNeeded(): void {
-    if (this.bufferMemoryBytes > this.maxBufferMemoryBytes * 0.9) {
-      // Evict oldest bank (first in map)
-      const oldestBankId = this.sliceBuffers.keys().next().value;
-      if (oldestBankId) {
-        console.warn(`[AudioEngine] Memory pressure, evicting bank ${oldestBankId}`);
-        this.unloadSliceBank(oldestBankId);
+    if (this.bufferMemoryBytes > this.maxBufferMemoryBytes * 0.95) {
+      // Find an unprotected bank to evict
+      for (const bankId of this.sliceBuffers.keys()) {
+        if (!this.protectedBanks.has(bankId)) {
+          console.warn(`[AudioEngine] Memory pressure, evicting unprotected bank ${bankId}`);
+          this.unloadSliceBank(bankId);
+          return;
+        }
       }
+      console.warn(`[AudioEngine] Memory pressure but all banks are protected - cannot evict`);
     }
   }
   

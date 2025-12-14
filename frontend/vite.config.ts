@@ -14,11 +14,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: `http://localhost:${BACKEND_PORT}`,
-        changeOrigin: true
-      },
-      '/ws': {
-        target: `ws://localhost:${BACKEND_PORT}`,
-        ws: true
+        changeOrigin: true,
+        ws: true  // Enable WebSocket proxying for /api/ws/* endpoints
       },
       '/files': {
         target: `http://localhost:${BACKEND_PORT}`,

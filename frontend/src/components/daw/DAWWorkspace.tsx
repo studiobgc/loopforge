@@ -2082,6 +2082,19 @@ export const DAWWorkspace: React.FC = () => {
   }));
   
   // Create/load a real slice bank when a stem is selected
+  // Protect current stem's bank from eviction when selected
+  useEffect(() => {
+    if (selectedStemId) {
+      audioEngine.current.protectBank(selectedStemId);
+    }
+    return () => {
+      if (selectedStemId) {
+        audioEngine.current.unprotectBank(selectedStemId);
+      }
+    };
+  }, [selectedStemId]);
+  
+  // Create/load a real slice bank when a stem is selected
   useEffect(() => {
     let cancelled = false;
 
@@ -2708,7 +2721,7 @@ export const DAWWorkspace: React.FC = () => {
                 label: m.label,
                 confidence: m.confidence,
               })) : undefined}
-              onRegionSlicesCreated={(bankId, newSlices) => {
+              onRegionSlicesCreated={async (bankId, newSlices) => {
                 console.log('[DAW] Region slices created:', bankId, newSlices.length);
                 const mappedSlices = newSlices.map((s: any) => ({
                   index: s.index,
@@ -2719,8 +2732,20 @@ export const DAWWorkspace: React.FC = () => {
                   transientStrength: s.transient_strength ?? 0.5,
                   brightness: (s.spectral_centroid ?? 0) / 20000,
                 }));
+                
+                // Update UI immediately
                 setSlices(mappedSlices);
                 sliceCacheRef.current.set(selectedStem.id, { bankId, slices: mappedSlices });
+                
+                // Load into audio engine so pads work immediately
+                const stemUrl = buildFileUrl(selectedStem.path);
+                audioEngine.current.protectBank(selectedStem.id);
+                await audioEngine.current.loadSliceBank(
+                  selectedStem.id,
+                  stemUrl,
+                  mappedSlices.map(s => ({ startTime: s.startTime, endTime: s.endTime }))
+                );
+                console.log('[DAW] Slices loaded into audio engine, ready to play!');
               }}
               className="border-b border-zinc-800"
             />

@@ -1926,6 +1926,44 @@ export const DAWWorkspace: React.FC = () => {
     return () => window.removeEventListener('keydown', handleShortcutsKey);
   }, [showShortcutsHelp]);
   
+  // Global keyboard shortcuts for session
+  useEffect(() => {
+    if (!session) return;
+    
+    const handleGlobalKeys = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      
+      // Shift+1-4: Quick stem switching (D/B/V/O)
+      if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const stemRoles = ['drums', 'bass', 'vocals', 'other'];
+        const keyToIndex: Record<string, number> = { '1': 0, '2': 1, '3': 2, '4': 3 };
+        const idx = keyToIndex[e.key];
+        if (idx !== undefined) {
+          e.preventDefault();
+          const targetStem = session.stems.find(s => s.role === stemRoles[idx]);
+          if (targetStem) {
+            setSelectedStemId(targetStem.id);
+            console.log(`[DAW] Quick switch to ${stemRoles[idx]}`);
+          }
+        }
+      }
+      
+      // Tab: Cycle through stems
+      if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        const currentIdx = session.stems.findIndex(s => s.id === selectedStemId);
+        const nextIdx = e.shiftKey 
+          ? (currentIdx - 1 + session.stems.length) % session.stems.length
+          : (currentIdx + 1) % session.stems.length;
+        setSelectedStemId(session.stems[nextIdx].id);
+        console.log(`[DAW] Cycle to ${session.stems[nextIdx].role}`);
+      }
+    };
+    
+    window.addEventListener('keydown', handleGlobalKeys);
+    return () => window.removeEventListener('keydown', handleGlobalKeys);
+  }, [session, selectedStemId]);
+  
   // =============================================================================
   // CROSS-STEM ROUTING
   // =============================================================================
@@ -3556,6 +3594,26 @@ export const DAWWorkspace: React.FC = () => {
           )}
         </div>
       </div>
+      
+      {/* Floating keyboard legend - always visible in corner */}
+      {session && !isLoading && (
+        <div className="fixed bottom-4 right-4 bg-zinc-900/95 border border-zinc-700 rounded-lg p-2 text-[10px] text-zinc-400 shadow-xl backdrop-blur-sm z-40">
+          <div className="flex items-center gap-3 mb-1.5">
+            <span className="text-zinc-500 font-semibold uppercase">Keys</span>
+            <button 
+              onClick={() => setShowShortcutsHelp(true)}
+              className="text-cyan-400 hover:text-cyan-300"
+            >?</button>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            <div><kbd className="bg-zinc-800 px-1 rounded text-zinc-500">1-8</kbd> <span>Row 1</span></div>
+            <div><kbd className="bg-zinc-800 px-1 rounded text-zinc-500">Q-I</kbd> <span>Row 2</span></div>
+            <div><kbd className="bg-zinc-800 px-1 rounded text-zinc-500">Space</kbd> <span>Play</span></div>
+            <div><kbd className="bg-zinc-800 px-1 rounded text-zinc-500">Tab</kbd> <span>Next stem</span></div>
+            <div><kbd className="bg-zinc-800 px-1 rounded text-zinc-500">⇧1-4</kbd> <span>D/B/V/O</span></div>
+          </div>
+        </div>
+      )}
       
       {/* Error toast */}
       {error && (

@@ -104,8 +104,11 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
 }) => {
   const [playingSlices, setPlayingSlices] = useState<Set<number>>(new Set());
   const [hoveredSlice, setHoveredSlice] = useState<number | null>(null);
+  const [sliceVelocities, setSliceVelocities] = useState<Map<number, number>>(new Map());
   const gridRef = useRef<HTMLDivElement>(null);
   const audioEngine = useRef(getAudioEngine());
+  const hoverTimerRef = useRef<number | null>(null);
+  const hoverPreviewEnabled = useRef(true); // Can be toggled
   
   const colors = ROLE_COLORS[stemRole];
   
@@ -129,15 +132,23 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
       pan: 0,
     });
     
-    // Visual feedback
+    // Visual feedback with velocity
     setPlayingSlices(prev => new Set(prev).add(index));
+    setSliceVelocities(prev => new Map(prev).set(index, velocity));
+    
+    const feedbackDuration = Math.min(slice.duration * 1000, 300);
     setTimeout(() => {
       setPlayingSlices(prev => {
         const next = new Set(prev);
         next.delete(index);
         return next;
       });
-    }, Math.min(slice.duration * 1000, 300));
+      setSliceVelocities(prev => {
+        const next = new Map(prev);
+        next.delete(index);
+        return next;
+      });
+    }, feedbackDuration);
     
     // Callbacks
     onSlicePlay?.(index, velocity);
@@ -210,6 +221,7 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
         const isHovered = hoveredSlice === index;
         const keyHint = getKeyHint(index);
         const probability = sliceProbabilities[index] ?? 1;
+        const velocity = sliceVelocities.get(index) ?? 0;
         
         return (
           <div
@@ -236,8 +248,27 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
               playSlice(index, velocity);
               onSliceSelect?.(index);
             }}
-            onMouseEnter={() => setHoveredSlice(index)}
-            onMouseLeave={() => setHoveredSlice(null)}
+            onMouseEnter={() => {
+              setHoveredSlice(index);
+              // Hover preview: play a quiet snippet after short delay
+              if (hoverPreviewEnabled.current) {
+                if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                hoverTimerRef.current = window.setTimeout(() => {
+                  audioEngine.current.triggerSlice(stemId, index, {
+                    velocity: 0.25, // Quiet preview
+                    pitch: 0,
+                    pan: 0,
+                  });
+                }, 150); // 150ms delay to avoid accidental triggers
+              }
+            }}
+            onMouseLeave={() => {
+              setHoveredSlice(null);
+              if (hoverTimerRef.current) {
+                clearTimeout(hoverTimerRef.current);
+                hoverTimerRef.current = null;
+              }
+            }}
           >
             {/* Inner highlight gradient */}
             <div className={cn(
@@ -274,16 +305,40 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
               </div>
             )}
             
+            {/* Velocity ripple effect when playing */}
+            {isPlaying && velocity > 0 && (
+              <div 
+                className="absolute inset-0 rounded-xl pointer-events-none animate-ping"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.3)',
+                  animationDuration: `${200 + (1 - velocity) * 200}ms`,
+                  animationIterationCount: 1,
+                }}
+              />
+            )}
+            
             {/* Center content area */}
             <div className="absolute inset-0 flex items-center justify-center">
+              {/* Velocity indicator when playing */}
+              {isPlaying && velocity > 0 && (
+                <div 
+                  className="absolute text-white font-bold text-lg drop-shadow-lg animate-bounce"
+                  style={{
+                    animationDuration: '150ms',
+                    animationIterationCount: 1,
+                    transform: `scale(${0.8 + velocity * 0.4})`,
+                  }}
+                >
+                  {Math.round(velocity * 100)}
+                </div>
+              )}
+              
               {/* Transient strength indicator */}
-              {slice.transientStrength > 0.5 && !showProbabilities && (
+              {!isPlaying && slice.transientStrength > 0.5 && !showProbabilities && (
                 <div className={cn(
                   'w-3 h-3 rounded-full transition-all duration-75',
-                  isPlaying 
-                    ? 'bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)]' 
-                    : 'bg-zinc-600/60',
-                  slice.transientStrength > 0.8 && !isPlaying && 'animate-pulse',
+                  'bg-zinc-600/60',
+                  slice.transientStrength > 0.8 && 'animate-pulse',
                 )} 
                 style={{
                   transform: `scale(${0.5 + slice.transientStrength * 0.5})`,

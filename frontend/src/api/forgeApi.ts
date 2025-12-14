@@ -1,7 +1,7 @@
 import axios, { AxiosProgressEvent } from 'axios';
 import { ForgeSession, ProcessingConfig, LoopViewModel } from '../types/forge';
 
-const API_BASE = 'http://localhost:8000/api/forge';
+const API_BASE = '/api/forge';
 
 // Configure axios instance with proper timeouts and error handling
 const apiClient = axios.create({
@@ -34,7 +34,7 @@ apiClient.interceptors.response.use(
         if (error.code === 'ECONNABORTED') {
             error.message = 'Request timeout - file may be too large or server is slow';
         } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
-            error.message = 'Cannot connect to server - make sure the backend is running on port 8000';
+            error.message = 'Cannot connect to server - make sure the backend is running';
         } else if (error.response) {
             // Server responded with error
             error.message = error.response.data?.detail || error.response.data?.message || error.message;
@@ -47,7 +47,7 @@ apiClient.interceptors.response.use(
 async function checkBackendHealth(maxRetries = 3): Promise<boolean> {
     for (let i = 0; i < maxRetries; i++) {
         try {
-            const response = await axios.get('http://localhost:8000/api/health', {
+            const response = await axios.get('/api/health', {
                 timeout: 2000,
                 validateStatus: () => true // Don't throw on any status
             });

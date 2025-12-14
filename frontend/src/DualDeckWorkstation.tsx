@@ -303,7 +303,7 @@ export default function DualDeckWorkstation() {
             setProcessingTasks(prev => prev.map(task => ({
                 ...task,
                 status: 'error' as const,
-                error: 'Cannot connect to backend server. Make sure it is running on port 8000.',
+                error: 'Cannot connect to backend server. Make sure it is running.',
                 progress: 0
             })))
             return
@@ -360,7 +360,7 @@ export default function DualDeckWorkstation() {
                 } else if (err.code === 'ECONNABORTED') {
                     errorMsg = 'Upload timeout - files may be too large or connection is slow'
                 } else if (err.code === 'ERR_NETWORK' || err.code === 'ECONNREFUSED') {
-                    errorMsg = 'Cannot connect to server - make sure the backend is running on port 8000'
+                    errorMsg = 'Cannot connect to server - make sure the backend is running'
                 }
                 throw new Error(errorMsg)
             })

@@ -49,7 +49,7 @@ import { MomentsTimeline } from './MomentsTimeline';
 import { VariationGenerator } from './VariationGenerator';
 import { PeaksWaveform } from '../audio/PeaksWaveform';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = '';
 
 const LOADING_PAD_KEYMAP: Record<string, number> = {
   '1': 0,

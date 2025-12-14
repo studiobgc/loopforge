@@ -1,48 +1,78 @@
 #!/bin/bash
 
-# LoopForge Launcher - Fast startup for Mac app
-# Ports: Frontend 3333, Backend 8888
+# LoopForge Launcher - Bulletproof Mac app launcher
+# Works after sleep, restart, or fresh boot
+
+# Load config
+source "$(dirname "$0")/config.sh"
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 export HOME="/Users/ben"
-APP_DIR="/Users/ben/Documents/GitHub/loopforge"
+
 LOG="/tmp/loopforge-launch.log"
+BACKEND_LOG="/tmp/loopforge-backend.log"
+FRONTEND_LOG="/tmp/loopforge-frontend.log"
 
-echo "$(date): Starting LoopForge..." > "$LOG"
+echo "$(date): LoopForge starting..." > "$LOG"
 
-# Check if already running - instant open
-if curl -s --connect-timeout 1 http://localhost:3333 > /dev/null 2>&1; then
+# Function to check if backend is healthy
+backend_healthy() {
+    curl -s --connect-timeout 2 "http://localhost:$LOOPFORGE_BACKEND_PORT/health" > /dev/null 2>&1
+}
+
+# Function to check if frontend is healthy  
+frontend_healthy() {
+    curl -s --connect-timeout 2 "http://localhost:$LOOPFORGE_FRONTEND_PORT" > /dev/null 2>&1
+}
+
+# Check if already running and healthy
+if frontend_healthy && backend_healthy; then
     echo "$(date): Already running" >> "$LOG"
-    open "http://localhost:3333"
+    open "http://localhost:$LOOPFORGE_FRONTEND_PORT"
     exit 0
 fi
 
-# Kill stale processes quickly
-lsof -ti:8888 | xargs kill -9 2>/dev/null &
-lsof -ti:3333 | xargs kill -9 2>/dev/null &
-sleep 0.5
+echo "$(date): Starting servers..." >> "$LOG"
+
+# Kill any stale processes
+lsof -ti:$LOOPFORGE_BACKEND_PORT | xargs kill -9 2>/dev/null
+lsof -ti:$LOOPFORGE_FRONTEND_PORT | xargs kill -9 2>/dev/null
+sleep 1
 
 # Start backend
-echo "$(date): Starting backend..." >> "$LOG"
-cd "$APP_DIR/backend"
-source venv/bin/activate 2>> "$LOG"
-nohup "$APP_DIR/backend/venv/bin/uvicorn" app.main_v2:app --host 0.0.0.0 --port 8888 >> /tmp/loopforge-backend.log 2>&1 &
+echo "$(date): Starting backend on port $LOOPFORGE_BACKEND_PORT..." >> "$LOG"
+cd "$LOOPFORGE_APP_DIR/backend"
+source venv/bin/activate
+nohup venv/bin/uvicorn app.main_v2:app --host 0.0.0.0 --port $LOOPFORGE_BACKEND_PORT > "$BACKEND_LOG" 2>&1 &
+BACKEND_PID=$!
+echo "$(date): Backend PID: $BACKEND_PID" >> "$LOG"
 
-# Start frontend immediately (don't wait for backend)
-echo "$(date): Starting frontend..." >> "$LOG"
-cd "$APP_DIR/frontend"
-nohup npm run dev >> /tmp/loopforge-frontend.log 2>&1 &
-
-# Quick wait for frontend (up to 8 seconds)
-for i in {1..8}; do
-    sleep 1
-    if curl -s --connect-timeout 1 http://localhost:3333 > /dev/null 2>&1; then
-        echo "$(date): Ready!" >> "$LOG"
-        open "http://localhost:3333"
-        exit 0
+# Wait for backend to be ready (up to 10 seconds)
+for i in {1..10}; do
+    if backend_healthy; then
+        echo "$(date): Backend ready" >> "$LOG"
+        break
     fi
+    sleep 1
 done
 
-# Fallback: open anyway, frontend might still be loading
-echo "$(date): Opening (may still be loading)" >> "$LOG"
-open "http://localhost:3333"
+# Start frontend
+echo "$(date): Starting frontend on port $LOOPFORGE_FRONTEND_PORT..." >> "$LOG"
+cd "$LOOPFORGE_APP_DIR/frontend"
+nohup npm run dev > "$FRONTEND_LOG" 2>&1 &
+FRONTEND_PID=$!
+echo "$(date): Frontend PID: $FRONTEND_PID" >> "$LOG"
+
+# Wait for frontend (up to 15 seconds)
+for i in {1..15}; do
+    if frontend_healthy; then
+        echo "$(date): Ready! Opening browser..." >> "$LOG"
+        open "http://localhost:$LOOPFORGE_FRONTEND_PORT"
+        exit 0
+    fi
+    sleep 1
+done
+
+# Fallback: open anyway
+echo "$(date): Timeout - opening browser anyway" >> "$LOG"
+open "http://localhost:$LOOPFORGE_FRONTEND_PORT"

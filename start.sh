@@ -18,14 +18,16 @@ fi
 # Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# Load config
+source "$(dirname "$0")/config.sh"
+
 # Start backend
-echo "[1/2] Starting backend on port 8000..."
+echo "[1/2] Starting backend on port $LOOPFORGE_BACKEND_PORT..."
 
 # SENIOR-LEVEL: Aggressive cleanup of stuck processes
 echo "[START] Killing any existing backend processes..."
-lsof -ti:8000 | xargs kill -9 2>/dev/null || true
-# Kill any existing frontend dev server too
-lsof -ti:3001 | xargs kill -9 2>/dev/null || true
+lsof -ti:$LOOPFORGE_BACKEND_PORT | xargs kill -9 2>/dev/null || true
+lsof -ti:$LOOPFORGE_FRONTEND_PORT | xargs kill -9 2>/dev/null || true
 # Also kill any stuck Python/uvicorn processes
 pkill -9 -f "uvicorn.*app.main_v2" 2>/dev/null || true
 pkill -9 -f "python.*app.main_v2" 2>/dev/null || true
@@ -40,14 +42,14 @@ source venv/bin/activate 2>/dev/null || {
 }
 
 # Start backend with logging
-uvicorn app.main_v2:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 60 --limit-max-requests 1000 > /tmp/backend.log 2>&1 &
+uvicorn app.main_v2:app --host 0.0.0.0 --port $LOOPFORGE_BACKEND_PORT --timeout-keep-alive 60 --limit-max-requests 1000 > /tmp/backend.log 2>&1 &
 BACKEND_PID=$!
 
 # Wait for backend and verify it's healthy
 echo "Waiting for backend to start..."
 for i in {1..10}; do
     sleep 1
-    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+    if curl -s http://localhost:$LOOPFORGE_BACKEND_PORT/health > /dev/null 2>&1; then
         echo "✅ Backend is running and healthy"
         break
     fi
@@ -59,7 +61,7 @@ for i in {1..10}; do
 done
 
 # Start frontend
-echo "[2/2] Starting frontend on port 3001..."
+echo "[2/2] Starting frontend on port $LOOPFORGE_FRONTEND_PORT..."
 cd "$SCRIPT_DIR/frontend"
 if [ ! -d "node_modules" ]; then
     echo "Installing frontend dependencies..."
@@ -69,7 +71,7 @@ npm run dev &
 FRONTEND_PID=$!
 
 echo ""
-echo "▶ LoopForge running at: http://localhost:3001"
+echo "▶ LoopForge running at: http://localhost:$LOOPFORGE_FRONTEND_PORT"
 echo "▶ Press Ctrl+C to stop"
 echo ""
 

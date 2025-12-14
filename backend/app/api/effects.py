@@ -39,7 +39,7 @@ class HarmonicFilterRequest(BaseModel):
     # Advanced parameters (Harmonium-inspired)
     spectral_tilt: float = Field(default=0.0, ge=-12.0, le=12.0, description="dB/octave tilt (-=darker, +=brighter)")
     voicing: str = Field(default="natural", description="Voicing: natural, odd_only, fifth, spread, dense")
-    motion: str = Field(default="static", description="Motion: static, breathe, pulse, shimmer, drift")
+    motion: str = Field(default="static", description="Motion: static, breathe, pulse, shimmer, drift, follow, transient")
     motion_rate: float = Field(default=0.1, ge=0.0, le=10.0, description="LFO rate in Hz")
     motion_depth: float = Field(default=0.3, ge=0.0, le=1.0, description="Modulation depth")
     
@@ -112,7 +112,7 @@ async def apply_harmonic_filter(request: HarmonicFilterRequest):
         raise HTTPException(400, f"Invalid voicing. Options: {', '.join(valid_voicings)}")
     
     # Validate motion
-    valid_motions = ['static', 'breathe', 'pulse', 'shimmer', 'drift']
+    valid_motions = ['static', 'breathe', 'pulse', 'shimmer', 'drift', 'follow', 'transient']
     if request.motion not in valid_motions:
         raise HTTPException(400, f"Invalid motion. Options: {', '.join(valid_motions)}")
     
@@ -125,7 +125,9 @@ async def apply_harmonic_filter(request: HarmonicFilterRequest):
     stem_name = input_path.stem
     preset_suffix = f"_{request.preset}" if request.preset else ""
     output_filename = f"{stem_name}_harmonic_{request.root_note}_{request.mode}{preset_suffix}.wav"
-    output_path = storage.get_session_path(request.session_id) / "effects" / output_filename
+    effects_dir = storage.root / "stems" / request.session_id / "effects"
+    effects_dir.mkdir(parents=True, exist_ok=True)
+    output_path = effects_dir / output_filename
     
     # Apply filterbank
     try:

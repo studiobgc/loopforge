@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from .model_manager import get_model_manager, get_separator
 from .forge_routes import router as forge_router
 from .slice_routes import router as slice_router
+from .api import api_router
 
 
 # Storage paths
@@ -98,8 +99,17 @@ app.include_router(forge_router)
 # Include Slice Sequencer routes
 app.include_router(slice_router)
 
+# Include unified API routes (sessions, effects, slices, etc.)
+app.include_router(api_router)
+
 # Mount static file serving for previews
 app.mount("/api/forge/stream", StaticFiles(directory="./forge_outputs"), name="stream")
+
+# Mount storage directory for file serving (uploads, stems, etc.)
+from pathlib import Path
+storage_dir = Path("./storage")
+storage_dir.mkdir(exist_ok=True)
+app.mount("/files", StaticFiles(directory=str(storage_dir)), name="files")
 
 
 @app.get("/api/health")

@@ -233,20 +233,30 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     if (audioBuffer && slices.length > 0) {
       const duration = audioBuffer.duration;
       
-      // Draw playing slice highlight first (behind everything)
+      // Draw playing slice highlight first (VERY VISIBLE)
       if (playingSliceIndex !== undefined && slices[playingSliceIndex]) {
         const playingSlice = slices[playingSliceIndex];
         const x1 = (playingSlice.startTime / duration) * width;
         const x2 = (playingSlice.endTime / duration) * width;
+        const sliceWidth = Math.max(x2 - x1, 8); // Minimum 8px wide
         
-        // Bright highlight for playing region
-        ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
-        ctx.fillRect(x1, 0, x2 - x1, height);
+        // Bright pulsing highlight for playing region
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.5)';
+        ctx.fillRect(x1, 0, sliceWidth, height);
         
-        // Animated border glow
+        // Inner glow
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.3)';
+        ctx.fillRect(x1 + 2, 2, sliceWidth - 4, height - 4);
+        
+        // Thick border
         ctx.strokeStyle = '#22c55e';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x1, 0, x2 - x1, height);
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x1, 0, sliceWidth, height);
+        
+        // Draw slice number prominently
+        ctx.font = 'bold 14px monospace';
+        ctx.fillStyle = '#22c55e';
+        ctx.fillText(`PAD ${playingSliceIndex + 1}`, x1 + 6, 18);
       }
       
       slices.forEach((slice, index) => {

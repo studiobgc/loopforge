@@ -5,6 +5,7 @@ import { ProcessingConfig, VocalSettings, LoopViewModel } from './types/forge'
 import { RetroButton, RetroSelect } from './components/ui/RetroControls'
 import { SessionPlayer } from './components/SessionPlayer'
 import { ProcessingQueue } from './components/ProcessingQueue'
+import { FileBrowser } from './components/FileBrowser'
 
 const ROLE_OPTIONS = [
     { id: 'drums', label: 'DRUMS' },
@@ -34,6 +35,7 @@ type SourceTrack = {
 export default function DualDeckWorkstation() {
     // Processing Queue (replaces phase system)
     const [processingTasks, setProcessingTasks] = useState<ProcessingTask[]>([])
+    const [showFileBrowser, setShowFileBrowser] = useState(true)
 
     // Session State
     const [sources, setSources] = useState<SourceTrack[]>([])
@@ -427,44 +429,146 @@ export default function DualDeckWorkstation() {
 
             {/* WORKSPACE - UNIFIED LAYOUT */}
             <div className="rack-workspace">
-                {/* LEFT PANEL - Upload + Processing Queue */}
-                <aside className="rack-sidebar glass-strong">
-                    <div className="sidebar-header">Source Deck</div>
+                {/* FILE BROWSER PANEL */}
+                {showFileBrowser && (
+                    <aside 
+                        className="glass-strong" 
+                        style={{ 
+                            width: 260, 
+                            minWidth: 260,
+                            display: 'flex', 
+                            flexDirection: 'column',
+                            borderRight: '1px solid rgba(255,255,255,0.05)',
+                            position: 'relative',
+                        }}
+                    >
+                        <button
+                            onClick={() => setShowFileBrowser(false)}
+                            style={{
+                                position: 'absolute',
+                                top: 8,
+                                right: 8,
+                                background: 'rgba(255,255,255,0.1)',
+                                border: 'none',
+                                borderRadius: '3px',
+                                padding: '2px 6px',
+                                fontSize: '9px',
+                                color: 'var(--text-dim)',
+                                cursor: 'pointer',
+                                zIndex: 10,
+                            }}
+                            title="Hide file browser"
+                        >
+                            ✕
+                        </button>
+                        <FileBrowser onFileSelect={onDrop} />
+                    </aside>
+                )}
 
-                    {/* Drop Zone */}
+                {/* LEFT PANEL - Upload + Processing Queue */}
+                <aside className="rack-sidebar glass-strong" style={{ position: 'relative' }}>
+                    <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>Source Deck</span>
+                        {!showFileBrowser && (
+                            <button
+                                onClick={() => setShowFileBrowser(true)}
+                                style={{
+                                    background: 'rgba(6, 182, 212, 0.2)',
+                                    border: '1px solid rgba(6, 182, 212, 0.3)',
+                                    borderRadius: '3px',
+                                    padding: '2px 8px',
+                                    fontSize: '8px',
+                                    color: 'var(--accent-primary)',
+                                    cursor: 'pointer',
+                                    letterSpacing: '0.5px',
+                                }}
+                                title="Show file browser"
+                            >
+                                📁 BROWSER
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Drop Zone - Enhanced UX */}
                     <div
                         {...getRootProps()}
-                        className="flex-center flex-col smooth-transition"
+                        className="flex-center flex-col"
                         style={{
-                            padding: 20,
-                            borderBottom: '1px solid rgba(255,255,255,0.05)',
-                            background: isDragActive ? 'rgba(6, 182, 212, 0.1)' : 'transparent',
-                            cursor: 'pointer'
+                            padding: isDragActive ? 24 : 16,
+                            background: isDragActive 
+                                ? 'linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.1))' 
+                                : 'rgba(255,255,255,0.02)',
+                            cursor: 'pointer',
+                            border: isDragActive 
+                                ? '2px dashed rgba(6, 182, 212, 0.6)' 
+                                : '2px dashed rgba(255,255,255,0.1)',
+                            margin: 8,
+                            borderRadius: 8,
+                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                            transform: isDragActive ? 'scale(1.02)' : 'scale(1)',
                         }}
                     >
                         <input {...getInputProps()} />
-                        <div className="text-[10px] text-slate-500">DROP STEMS HERE (BULK SUPPORTED)</div>
+                        <div style={{ 
+                            fontSize: isDragActive ? '28px' : '20px', 
+                            marginBottom: 8,
+                            opacity: isDragActive ? 1 : 0.5,
+                            transition: 'all 0.2s ease',
+                            filter: isDragActive ? 'drop-shadow(0 0 8px rgba(6, 182, 212, 0.5))' : 'none',
+                        }}>
+                            {isDragActive ? '📥' : '🎵'}
+                        </div>
+                        <div style={{ 
+                            textAlign: 'center',
+                            fontSize: isDragActive ? '11px' : '10px',
+                            color: isDragActive ? 'var(--accent-primary)' : 'var(--text-dim)',
+                            fontWeight: isDragActive ? 600 : 400,
+                            letterSpacing: '0.5px',
+                            transition: 'all 0.2s ease',
+                        }}>
+                            {isDragActive ? 'DROP TO ADD FILES' : 'DROP FILES HERE'}
+                        </div>
+                        <div style={{
+                            fontSize: '8px',
+                            color: 'var(--text-dim)',
+                            marginTop: 4,
+                            opacity: isDragActive ? 0 : 0.6,
+                        }}>
+                            WAV • MP3 • AIFF • FLAC • M4A
+                        </div>
                     </div>
 
                     {/* Source Tracks */}
                     <div className="flex-col gap-3 p-4 overflow-y-auto flex-1 custom-scrollbar">
-                        {sources.map((track) => (
-                            <div
-                                key={track.id}
-                                className="vst-panel smooth-transition hover:border-cyan-500/30"
-                            >
-                                <div className="text-[10px] font-mono text-slate-300 truncate mb-2.5" style={{ lineHeight: '1.4' }}>{track.filename}</div>
-                                <div className="flex gap-2">
-                                    <RetroSelect
-                                        value={track.role || ''}
-                                        onChange={(value: string) => setRole(track.id, (value as Role) || null)}
-                                        options={[{ value: '', label: 'ROLE' }, ...ROLE_OPTIONS.map(r => ({ value: r.id, label: r.label }))]}
-                                        style={{ flex: 1, fontSize: 9 }}
-                                    />
-                                    <RetroButton onClick={() => removeTrack(track.id)} style={{ fontSize: 9, padding: '2px 6px' }}>×</RetroButton>
-                                </div>
+                        {sources.length === 0 ? (
+                            <div style={{ 
+                                textAlign: 'center', 
+                                padding: '20px 10px',
+                                color: 'var(--text-dim)',
+                                fontSize: '9px',
+                            }}>
+                                No files added yet.<br/>
+                                Use the file browser or drop files here.
                             </div>
-                        ))}
+                        ) : (
+                            sources.map((track) => (
+                                <div
+                                    key={track.id}
+                                    className="vst-panel smooth-transition hover:border-cyan-500/30"
+                                >
+                                    <div className="text-[10px] font-mono text-slate-300 truncate mb-2.5" style={{ lineHeight: '1.4' }}>{track.filename}</div>
+                                    <div className="flex gap-2">
+                                        <RetroSelect
+                                            value={track.role || ''}
+                                            onChange={(value: string) => setRole(track.id, (value as Role) || null)}
+                                            options={[{ value: '', label: 'ROLE' }, ...ROLE_OPTIONS.map(r => ({ value: r.id, label: r.label }))]}
+                                            style={{ flex: 1, fontSize: 9 }}
+                                        />
+                                        <RetroButton onClick={() => removeTrack(track.id)} style={{ fontSize: 9, padding: '2px 6px' }}>×</RetroButton>
+                                    </div>
+                                </div>
+                            ))
+                        )}
                     </div>
 
                     {/* Processing Queue */}

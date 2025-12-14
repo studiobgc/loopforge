@@ -18,6 +18,7 @@ from .websocket import router as ws_router
 from .grid import router as grid_router
 from .embeddings import router as embeddings_router
 from .effects import router as effects_router
+from .filebrowser import router as filebrowser_router
 
 # Main API router
 api_router = APIRouter(prefix="/api")
@@ -40,5 +41,6 @@ api_router.include_router(ws_router)
 api_router.include_router(grid_router)
 api_router.include_router(embeddings_router)
 api_router.include_router(effects_router)
+api_router.include_router(filebrowser_router)
 
 __all__ = ['api_router']

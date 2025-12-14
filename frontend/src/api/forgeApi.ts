@@ -122,8 +122,9 @@ export const forgeApi = {
                         onProgress(Math.min(uploadProgress, 80));
                     } else if (progressEvent.loaded && onProgress) {
                         // If total is unknown, estimate based on loaded bytes
-                        const estimatedProgress = Math.min((uploadedSize / (totalSize || 1)) * 80, 80);
                         uploadedSize = progressEvent.loaded;
+                        const estimatedProgress = Math.min((uploadedSize / (totalSize || 1)) * 80, 80);
+                        console.log(`[UPLOAD] Progress (estimated): ${estimatedProgress.toFixed(1)}% (${(uploadedSize / 1024 / 1024).toFixed(2)} MB / ${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
                         onProgress(estimatedProgress);
                     }
                 },

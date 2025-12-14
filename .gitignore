@@ -11,6 +11,9 @@
 backend/storage/
 backend/uploads/
 backend/None/
+backend/forge_outputs/
+backend/forge_uploads/
+backend/outputs/
 
 # Python
 __pycache__/

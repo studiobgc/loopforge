@@ -31,11 +31,13 @@ import {
   Loader2,
   Zap,
   Clock,
+  Send,
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { api } from '../../api/client';
 import SliceSequencer from './SliceSequencer';
 import HarmonicFilterPanel from '../effects/HarmonicFilterPanel';
+import { useSession, SharedStem } from '../../contexts/SessionContext';
 
 // =============================================================================
 // TYPES
@@ -229,9 +231,10 @@ const StemCard: React.FC<{
   onClick: () => void;
   onDownload: () => void;
   onPreview: () => void;
+  onSendToPitchify: () => void;
   isPlaying?: boolean;
   sessionKey?: string;
-}> = ({ stem, isSelected, isAnalyzing, onClick, onDownload, onPreview, isPlaying, sessionKey }) => {
+}> = ({ stem, isSelected, isAnalyzing, onClick, onDownload, onPreview, onSendToPitchify, isPlaying, sessionKey }) => {
   const style = ROLE_STYLES[stem.role] || ROLE_STYLES.other;
   
   // Check for key mismatch with session
@@ -282,6 +285,13 @@ const StemCard: React.FC<{
             title="Preview (Space)"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onSendToPitchify(); }}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-purple-400 hover:bg-purple-500/20 transition-colors"
+            title="Send to Pitchify Lab"
+          >
+            <Send className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onDownload(); }}
@@ -347,6 +357,9 @@ export const LoopForgeWorkspace: React.FC = () => {
   const [showEffects, setShowEffects] = useState(false);
   const [playingStem, setPlayingStem] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Shared session context for Pitchify Lab integration
+  const { sendToPitchifyLab } = useSession();
   
   // Processing state
   const [isProcessing, setIsProcessing] = useState(false);
@@ -532,6 +545,31 @@ export const LoopForgeWorkspace: React.FC = () => {
       };
     });
   }, []);
+
+  // Send stem to Pitchify Lab
+  const handleSendToPitchify = useCallback((stem: StemInfo) => {
+    if (!session) return;
+    
+    const sharedStem: SharedStem = {
+      id: `${session.id}-${stem.role}`,
+      name: stem.name,
+      path: stem.path,
+      role: stem.role,
+      sessionId: session.id,
+      audioUrl: `/files/${stem.path}`,
+      detected_key: stem.detected_key,
+      detected_bpm: stem.detected_bpm,
+    };
+    
+    // Store in localStorage for persistence across view switch
+    localStorage.setItem('pitchify_pending_stem', JSON.stringify(sharedStem));
+    
+    // Add to context (for same-session access)
+    sendToPitchifyLab(sharedStem);
+    
+    // Switch to Pitchify Lab via hash change (App.tsx listens to this)
+    window.location.hash = '#pitchify';
+  }, [session, sendToPitchifyLab]);
 
   // Audio preview
   const handlePreviewStem = useCallback((stem: StemInfo) => {
@@ -729,6 +767,7 @@ export const LoopForgeWorkspace: React.FC = () => {
                     onClick={() => setSelectedStem(stem.role)}
                     onDownload={() => handleDownloadStem(stem)}
                     onPreview={() => handlePreviewStem(stem)}
+                    onSendToPitchify={() => handleSendToPitchify(stem)}
                     isPlaying={playingStem === stem.role}
                     sessionKey={session.key}
                   />

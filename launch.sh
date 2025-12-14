@@ -5,7 +5,7 @@
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export HOME="/Users/ben"
-APP_DIR="/Users/ben/Documents/github/loopforge"
+APP_DIR="/Users/ben/Documents/GitHub/loopforge"
 
 # Log file for debugging
 LOG="/tmp/loopforge-launch.log"

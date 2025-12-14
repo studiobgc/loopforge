@@ -2618,6 +2618,13 @@ export const DAWWorkspace: React.FC = () => {
             </button>
           )}
           
+          {/* Hint to click stems */}
+          {!selectedStemId && session?.stems && session.stems.length > 0 && (
+            <div className="mx-2 mb-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400 text-xs text-center animate-pulse">
+              👆 Click a stem below to load slices
+            </div>
+          )}
+          
           <div className="flex-1 overflow-y-auto p-2">
             {session?.stems.map((stem) => (
               <div
@@ -2674,8 +2681,12 @@ export const DAWWorkspace: React.FC = () => {
                 colorScheme="neon"
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-zinc-600">
-                Select a stem to view waveform
+              <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">👈</span>
+                  <span>Click a stem on the left (Drums, Bass, Vocals, Other)</span>
+                </div>
+                <span className="text-xs text-zinc-600">This loads slices into the pads below</span>
               </div>
             )}
           </div>
@@ -2756,10 +2767,21 @@ export const DAWWorkspace: React.FC = () => {
               <div className="h-full flex items-center justify-center text-zinc-600">
                 <div className="text-center">
                   <div className="text-4xl mb-2">🎹</div>
-                  <div className="text-sm">Select a stem to view slices</div>
-                  <div className="text-xs text-zinc-700 mt-1">
-                    Press 1-8, Q-I, A-K, Z-M to play
-                  </div>
+                  {selectedStem ? (
+                    <>
+                      <div className="text-sm text-amber-400">Loading slices for {selectedStem.role}...</div>
+                      <div className="text-xs text-zinc-600 mt-2">
+                        Or use <span className="text-cyan-400">MOMENTS</span> above: click a phrase → Send to Pads
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm">👈 Click a stem on the left first</div>
+                      <div className="text-xs text-zinc-700 mt-1">
+                        Then use keyboard 1-8, Q-I, A-K, Z-M to play pads
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}

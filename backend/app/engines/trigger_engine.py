@@ -506,29 +506,41 @@ class PolyrhythmicTriggerSource(TriggerSource):
         ]
     
     def get_trigger_times(self, duration_beats: float, bpm: float) -> List[float]:
+        """
+        Generate trigger times from all polyrhythmic layers.
+        
+        Each layer generates its own pattern, then all are merged and sorted.
+        """
         all_times = []
         
         if not self.layers:
             return []
         
-        for layer in self.layers:
-            hits = max(1, layer.get('hits', 4))
-            steps = max(1, layer.get('steps', 4))
-            subdivision = max(0.25, layer.get('subdivision', 1.0))  # Prevent division by zero
-            offset = layer.get('offset', 0.0)
-            
-            # Use Euclidean pattern for each layer
-            euclidean = EuclideanTriggerSource(hits=min(hits, steps), steps=steps)
-            layer_times = euclidean.get_trigger_times(duration_beats, bpm)
-            
-            # Apply subdivision and offset
-            step_duration = 1.0 / subdivision
-            for time in layer_times:
-                adjusted_time = (time * step_duration) + offset
-                if 0 <= adjusted_time < duration_beats:
-                    all_times.append(adjusted_time)
+        for layer_idx, layer in enumerate(self.layers):
+            try:
+                hits = max(1, layer.get('hits', 4))
+                steps = max(1, layer.get('steps', 4))
+                subdivision = max(0.25, layer.get('subdivision', 1.0))  # Prevent division by zero
+                offset = layer.get('offset', 0.0)
+                
+                # Use Euclidean pattern for each layer
+                euclidean = EuclideanTriggerSource(hits=min(hits, steps), steps=steps)
+                layer_times = euclidean.get_trigger_times(duration_beats, bpm)
+                
+                # Apply subdivision and offset
+                step_duration = 1.0 / subdivision
+                for time in layer_times:
+                    adjusted_time = (time * step_duration) + offset
+                    # Validate time is within bounds
+                    if 0 <= adjusted_time < duration_beats:
+                        all_times.append(adjusted_time)
+            except Exception as e:
+                # Log error but continue with other layers
+                import logging
+                logging.warning(f"Error processing polyrhythmic layer {layer_idx}: {e}")
+                continue
         
-        # Merge and sort all trigger times
+        # Merge and sort all trigger times (remove duplicates)
         all_times = sorted(set(all_times))
         return all_times
     
@@ -569,6 +581,9 @@ class MicroTimingTriggerSource(TriggerSource):
             randomize: If True, use random offsets within range; if False, use pattern
         """
         self.base_source = base_source
+        # Validate offset_range
+        if len(offset_range) != 2 or offset_range[0] >= offset_range[1]:
+            raise ValueError("offset_range must be a tuple of (min, max) where min < max")
         self.offset_range = offset_range
         self.offset_pattern = offset_pattern or []
         self.randomize = randomize
@@ -590,10 +605,13 @@ class MicroTimingTriggerSource(TriggerSource):
                     offset = 0.0
             
             offset_time = time + offset
+            # Clamp to valid range to prevent negative times or times beyond duration
+            offset_time = max(0, min(offset_time, duration_beats - 0.001))
             if 0 <= offset_time < duration_beats:
                 offset_times.append(offset_time)
         
-        return sorted(offset_times)
+        # Remove duplicates and sort
+        return sorted(set(offset_times))
     
     def get_velocity(self, time: float) -> float:
         return self.base_source.get_velocity(time)

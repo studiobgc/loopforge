@@ -17,6 +17,7 @@ import {
   Settings,
 } from 'lucide-react';
 import * as Tone from 'tone';
+import { footworkApi, DrumSynthesisParams } from '../../api/footworkApi';
 
 // =============================================================================
 // TYPES
@@ -85,26 +86,21 @@ export const DrumSynthesizer: React.FC<DrumSynthesizerProps> = ({
     try {
       await Tone.start();
       
-      // Call API to synthesize
-      const response = await fetch('/api/footwork/synthesize-drum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          drum_type: activeTab,
-          freq_start: activeTab === 'kick' ? params.freqStart : undefined,
-          freq_end: activeTab === 'kick' ? params.freqEnd : undefined,
-          decay: params.decay,
-          saturation: params.saturation,
-          duration: params.duration,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-        throw new Error(errorData.detail || `HTTP ${response.status}: Failed to synthesize drum`);
+      // Build request params
+      const requestParams: DrumSynthesisParams = {
+        drum_type: activeTab,
+        decay: params.decay,
+        saturation: params.saturation,
+        duration: params.duration,
+      };
+      
+      if (activeTab === 'kick') {
+        requestParams.freq_start = params.freqStart;
+        requestParams.freq_end = params.freqEnd;
       }
-
-      const data = await response.json();
+      
+      // Call API to synthesize
+      const data = await footworkApi.synthesizeDrum(requestParams);
       
       if (!data.audio_data) {
         throw new Error('No audio data returned from server');
@@ -137,25 +133,20 @@ export const DrumSynthesizer: React.FC<DrumSynthesizerProps> = ({
 
   const handleExport = useCallback(async () => {
     try {
-      const response = await fetch('/api/footwork/synthesize-drum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          drum_type: activeTab,
-          freq_start: activeTab === 'kick' ? params.freqStart : undefined,
-          freq_end: activeTab === 'kick' ? params.freqEnd : undefined,
-          decay: params.decay,
-          saturation: params.saturation,
-          duration: params.duration,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-        throw new Error(errorData.detail || `HTTP ${response.status}: Failed to synthesize drum`);
+      // Build request params
+      const requestParams: DrumSynthesisParams = {
+        drum_type: activeTab,
+        decay: params.decay,
+        saturation: params.saturation,
+        duration: params.duration,
+      };
+      
+      if (activeTab === 'kick') {
+        requestParams.freq_start = params.freqStart;
+        requestParams.freq_end = params.freqEnd;
       }
-
-      const data = await response.json();
+      
+      const data = await footworkApi.synthesizeDrum(requestParams);
       
       if (!data.audio_data) {
         throw new Error('No audio data returned from server');
@@ -232,7 +223,10 @@ export const DrumSynthesizer: React.FC<DrumSynthesizerProps> = ({
                   max="200"
                   step="1"
                   value={params.freqStart}
-                  onChange={(e) => handleParamChange('freqStart', parseFloat(e.target.value))}
+                  onChange={(e) => {
+                    const val = Math.max(20, Math.min(200, parseFloat(e.target.value) || 60));
+                    handleParamChange('freqStart', val);
+                  }}
                   className="w-full"
                 />
               </div>
@@ -241,13 +235,16 @@ export const DrumSynthesizer: React.FC<DrumSynthesizerProps> = ({
                   <label className="text-sm text-zinc-400">End Frequency (Hz)</label>
                   <span className="text-xs text-zinc-500">{params.freqEnd.toFixed(1)} Hz</span>
                 </div>
-                <input
+                  <input
                   type="range"
                   min="10"
                   max="100"
                   step="1"
                   value={params.freqEnd}
-                  onChange={(e) => handleParamChange('freqEnd', parseFloat(e.target.value))}
+                  onChange={(e) => {
+                    const val = Math.max(10, Math.min(100, parseFloat(e.target.value) || 20));
+                    handleParamChange('freqEnd', val);
+                  }}
                   className="w-full"
                 />
               </div>
@@ -302,7 +299,10 @@ export const DrumSynthesizer: React.FC<DrumSynthesizerProps> = ({
               max="2.0"
               step="0.05"
               value={params.decay}
-              onChange={(e) => handleParamChange('decay', parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = Math.max(0.05, Math.min(2.0, parseFloat(e.target.value) || 0.5));
+                handleParamChange('decay', val);
+              }}
               className="w-full"
             />
           </div>
@@ -318,7 +318,10 @@ export const DrumSynthesizer: React.FC<DrumSynthesizerProps> = ({
               max="1"
               step="0.01"
               value={params.saturation}
-              onChange={(e) => handleParamChange('saturation', parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = Math.max(0, Math.min(1, parseFloat(e.target.value) || 0));
+                handleParamChange('saturation', val);
+              }}
               className="w-full"
             />
           </div>
@@ -334,7 +337,10 @@ export const DrumSynthesizer: React.FC<DrumSynthesizerProps> = ({
               max="2.0"
               step="0.1"
               value={params.duration}
-              onChange={(e) => handleParamChange('duration', parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = Math.max(0.1, Math.min(2.0, parseFloat(e.target.value) || 0.5));
+                handleParamChange('duration', val);
+              }}
               className="w-full"
             />
           </div>

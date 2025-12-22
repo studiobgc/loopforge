@@ -101,12 +101,24 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
   }, [pattern.layers.length]);
 
   const handleRemoveLayer = useCallback((layerId: string) => {
-    setPattern(prev => ({
-      ...prev,
-      layers: prev.layers.filter(l => l.id !== layerId),
-    }));
+    setPattern(prev => {
+      const newLayers = prev.layers.filter(l => l.id !== layerId);
+      // Ensure at least one layer remains
+      if (newLayers.length === 0) {
+        return prev; // Don't remove if it's the last layer
+      }
+      return { ...prev, layers: newLayers };
+    });
+    
+    // Update selected layer if needed
     if (selectedLayer === layerId) {
-      setSelectedLayer(pattern.layers.find(l => l.id !== layerId)?.id || null);
+      setPattern(prev => {
+        const remaining = prev.layers.filter(l => l.id !== layerId);
+        return prev; // Will trigger useEffect to update selectedLayer
+      });
+      // Find next available layer
+      const remainingLayers = pattern.layers.filter(l => l.id !== layerId);
+      setSelectedLayer(remainingLayers[0]?.id || null);
     }
   }, [selectedLayer, pattern.layers]);
 
@@ -138,10 +150,26 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
     }));
   }, []);
 
-  const handlePresetChange = useCallback((preset: string) => {
-    // Load preset configuration
-    // This would call the API to get preset config
-    setPattern(prev => ({ ...prev, preset }));
+  const handlePresetChange = useCallback(async (preset: string) => {
+    if (!preset) {
+      setPattern(prev => ({ ...prev, preset: undefined }));
+      return;
+    }
+    
+    try {
+      // Load preset configuration from API
+      const { footworkApi } = await import('../../api/footworkApi');
+      const presetsData = await footworkApi.listPresets();
+      
+      if (presetsData.presets[preset]) {
+        setPattern(prev => ({ ...prev, preset }));
+        // TODO: Could load full preset config and apply to layers
+      }
+    } catch (error) {
+      console.error('Error loading preset:', error);
+      // Still set preset name even if API call fails
+      setPattern(prev => ({ ...prev, preset }));
+    }
   }, []);
 
   const handleGenerate = useCallback(() => {
@@ -252,7 +280,10 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
                     min="1"
                     max="32"
                     value={selectedLayerData.hits}
-                    onChange={(e) => handleUpdateLayer(selectedLayerData.id, { hits: parseInt(e.target.value) || 1 })}
+                    onChange={(e) => {
+                      const val = Math.max(1, Math.min(32, parseInt(e.target.value) || 1));
+                      handleUpdateLayer(selectedLayerData.id, { hits: val });
+                    }}
                     className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-sm"
                   />
                 </div>
@@ -263,7 +294,10 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
                     min="1"
                     max="32"
                     value={selectedLayerData.steps}
-                    onChange={(e) => handleUpdateLayer(selectedLayerData.id, { steps: parseInt(e.target.value) || 1 })}
+                    onChange={(e) => {
+                      const val = Math.max(1, Math.min(32, parseInt(e.target.value) || 1));
+                      handleUpdateLayer(selectedLayerData.id, { steps: val });
+                    }}
                     className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-sm"
                   />
                 </div>
@@ -275,7 +309,10 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
                     max="8"
                     step="0.25"
                     value={selectedLayerData.subdivision}
-                    onChange={(e) => handleUpdateLayer(selectedLayerData.id, { subdivision: parseFloat(e.target.value) || 1.0 })}
+                    onChange={(e) => {
+                      const val = Math.max(0.25, Math.min(8, parseFloat(e.target.value) || 1.0));
+                      handleUpdateLayer(selectedLayerData.id, { subdivision: val });
+                    }}
                     className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-sm"
                   />
                 </div>
@@ -287,7 +324,10 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
                     max="2"
                     step="0.1"
                     value={selectedLayerData.offset}
-                    onChange={(e) => handleUpdateLayer(selectedLayerData.id, { offset: parseFloat(e.target.value) || 0.0 })}
+                    onChange={(e) => {
+                      const val = Math.max(-2, Math.min(2, parseFloat(e.target.value) || 0.0));
+                      handleUpdateLayer(selectedLayerData.id, { offset: val });
+                    }}
                     className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-sm"
                   />
                 </div>
@@ -299,15 +339,18 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
                   <label className="text-sm text-zinc-400">Saturation</label>
                   <span className="text-xs text-zinc-500">{Math.round(selectedLayerData.saturation * 100)}%</span>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={selectedLayerData.saturation}
-                  onChange={(e) => handleUpdateLayer(selectedLayerData.id, { saturation: parseFloat(e.target.value) })}
-                  className="w-full"
-                />
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={selectedLayerData.saturation}
+                    onChange={(e) => {
+                      const val = Math.max(0, Math.min(1, parseFloat(e.target.value) || 0));
+                      handleUpdateLayer(selectedLayerData.id, { saturation: val });
+                    }}
+                    className="w-full"
+                  />
               </div>
 
               {/* Micro-Timing Editor */}
@@ -324,7 +367,10 @@ export const FootworkSequencer: React.FC<FootworkSequencerProps> = ({
                           max="0.2"
                           step="0.01"
                           value={offset}
-                          onChange={(e) => handleMicroOffsetChange(selectedLayerData.id, i, parseFloat(e.target.value))}
+                          onChange={(e) => {
+                            const val = Math.max(-0.2, Math.min(0.2, parseFloat(e.target.value) || 0));
+                            handleMicroOffsetChange(selectedLayerData.id, i, val);
+                          }}
                           className="w-full"
                           orient="vertical"
                           style={{ writingMode: 'vertical-lr' }}

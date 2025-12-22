@@ -57,6 +57,11 @@ export interface TriggerEvent {
   filter_cutoff?: number;
   triggered_by?: string;
   rule_modified: boolean;
+  // Footwork-specific parameters
+  micro_offset?: number;
+  envelope_sweep?: number;
+  saturation_amount?: number;
+  swing_amount?: number;
 }
 
 export interface TriggerRule {
@@ -88,7 +93,8 @@ export type TriggerMode =
   | 'pattern' 
   | 'follow' 
   | 'euclidean' 
-  | 'chaos';
+  | 'chaos'
+  | 'footwork';
 
 // =============================================================================
 // API CLIENT

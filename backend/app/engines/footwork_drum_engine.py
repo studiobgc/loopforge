@@ -10,8 +10,7 @@ Inspired by Chicago footwork's use of TR-808/909 drum machines.
 """
 
 import numpy as np
-from typing import Optional, Tuple
-from pedalboard import Pedalboard, Distortion, Compressor, Limiter
+from typing import Optional, Tuple, List, Dict, Any
 
 
 class FootworkDrumEngine:
@@ -72,8 +71,10 @@ class FootworkDrumEngine:
         amp_envelope = np.exp(-t / (decay * 0.8))
         audio = audio * amp_envelope
         
-        # Normalize
-        audio = audio / np.max(np.abs(audio)) if np.max(np.abs(audio)) > 0 else audio
+        # Normalize (handle edge case of silent audio)
+        max_amp = np.max(np.abs(audio))
+        if max_amp > 1e-6:  # Avoid division by very small numbers
+            audio = audio / max_amp
         
         # Apply saturation if requested
         if saturation > 0:
@@ -126,8 +127,10 @@ class FootworkDrumEngine:
         # Combine
         audio = noise + sine
         
-        # Normalize
-        audio = audio / np.max(np.abs(audio)) if np.max(np.abs(audio)) > 0 else audio
+        # Normalize (handle edge case of silent audio)
+        max_amp = np.max(np.abs(audio))
+        if max_amp > 1e-6:  # Avoid division by very small numbers
+            audio = audio / max_amp
         
         # Apply saturation if requested
         if saturation > 0:
@@ -176,8 +179,10 @@ class FootworkDrumEngine:
             high_freq = high_freq * envelope * (brightness - 0.5) * 0.3
             audio = audio + high_freq
         
-        # Normalize
-        audio = audio / np.max(np.abs(audio)) if np.max(np.abs(audio)) > 0 else audio
+        # Normalize (handle edge case of silent audio)
+        max_amp = np.max(np.abs(audio))
+        if max_amp > 1e-6:  # Avoid division by very small numbers
+            audio = audio / max_amp
         
         return audio.astype(np.float32)
     
@@ -208,7 +213,7 @@ class FootworkDrumEngine:
     
     def synthesize_pattern(
         self,
-        pattern: list,  # List of (time, type, params) tuples
+        pattern: List[Tuple[float, str, Dict[str, Any]]],  # List of (time, type, params) tuples
         bpm: float = 160.0,
         duration_beats: float = 4.0,
     ) -> np.ndarray:
@@ -230,31 +235,46 @@ class FootworkDrumEngine:
         audio = np.zeros(num_samples, dtype=np.float32)
         
         for time_beats, drum_type, params in pattern:
+            # Validate time
+            if time_beats < 0 or time_beats >= duration_beats:
+                continue
+            
             time_seconds = (time_beats * 60.0) / bpm
             sample_offset = int(time_seconds * self.sr)
             
-            if sample_offset >= num_samples:
+            if sample_offset < 0 or sample_offset >= num_samples:
                 continue
             
-            # Synthesize the drum hit
-            if drum_type == 'kick':
-                hit = self.synthesize_kick(**params)
-            elif drum_type == 'snare':
-                hit = self.synthesize_snare(**params)
-            elif drum_type == 'hat':
-                hit = self.synthesize_hat(**params)
-            else:
+            # Synthesize the drum hit with error handling
+            try:
+                if drum_type == 'kick':
+                    hit = self.synthesize_kick(**params)
+                elif drum_type == 'snare':
+                    hit = self.synthesize_snare(**params)
+                elif drum_type == 'hat':
+                    hit = self.synthesize_hat(**params)
+                else:
+                    continue
+            except Exception as e:
+                # Log error but continue with other hits
+                import logging
+                logging.warning(f"Failed to synthesize {drum_type} at {time_beats} beats: {e}")
                 continue
             
-            # Mix into audio
-            end_offset = min(sample_offset + len(hit), num_samples)
-            hit_length = end_offset - sample_offset
-            audio[sample_offset:end_offset] += hit[:hit_length]
+            # Mix into audio (handle bounds checking)
+            if len(hit) > 0:
+                end_offset = min(sample_offset + len(hit), num_samples)
+                hit_length = end_offset - sample_offset
+                if hit_length > 0:
+                    audio[sample_offset:end_offset] += hit[:hit_length]
         
-        # Normalize to prevent clipping
+        # Normalize to prevent clipping (with safety margin)
         max_val = np.max(np.abs(audio))
         if max_val > 0.95:
             audio = audio * (0.95 / max_val)
+        elif max_val < 1e-6:
+            # Silent pattern - return zeros
+            audio = np.zeros_like(audio)
         
         # Convert to stereo
         stereo = np.stack([audio, audio])

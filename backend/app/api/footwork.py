@@ -4,6 +4,7 @@ Footwork Production API - Drum synthesis and pattern generation endpoints.
 Provides TR-808 style drum synthesis and footwork pattern generation.
 """
 
+import logging
 from fastapi import APIRouter, HTTPException, Query, Body
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -21,9 +22,11 @@ from ..engines.trigger_engine import (
 )
 from ..core.storage import get_storage
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/footwork", tags=["footwork"])
 
-# Initialize drum engine
+# Initialize drum engine (singleton pattern)
 _drum_engine = FootworkDrumEngine(sample_rate=44100)
 
 
@@ -101,7 +104,11 @@ async def synthesize_drum(
             "duration": duration,
         }
     
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors)
+        raise
     except Exception as e:
+        logger.error(f"Error synthesizing drum {drum_type}: {str(e)}", exc_info=True)
         raise HTTPException(500, f"Error synthesizing drum: {str(e)}")
 
 
@@ -218,7 +225,11 @@ async def generate_pattern(
             "events": events_dict,
         }
     
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors)
+        raise
     except Exception as e:
+        logger.error(f"Error generating pattern: {str(e)}", exc_info=True)
         raise HTTPException(500, f"Error generating pattern: {str(e)}")
 
 
@@ -258,13 +269,37 @@ async def synthesize_pattern(
     ]
     """
     try:
+        # Validate parameters
+        if bpm <= 0 or bpm > 300:
+            raise HTTPException(400, f"bpm must be between 0 and 300, got {bpm}")
+        
+        if duration_beats <= 0 or duration_beats > 64:
+            raise HTTPException(400, f"duration_beats must be between 0 and 64, got {duration_beats}")
+        
+        if not pattern:
+            raise HTTPException(400, "pattern cannot be empty")
+        
         # Convert pattern format
         pattern_list = []
-        for item in pattern:
+        for i, item in enumerate(pattern):
+            if not isinstance(item, dict):
+                raise HTTPException(400, f"Pattern item {i} must be a dictionary")
+            
             time = item.get('time', 0.0)
+            if time < 0 or time >= duration_beats:
+                logger.warning(f"Pattern item {i} has time {time} outside pattern duration, skipping")
+                continue
+            
             drum_type = item.get('type', 'kick')
+            if drum_type not in ['kick', 'snare', 'hat']:
+                logger.warning(f"Pattern item {i} has invalid drum_type {drum_type}, skipping")
+                continue
+            
             params = item.get('params', {})
             pattern_list.append((time, drum_type, params))
+        
+        if not pattern_list:
+            raise HTTPException(400, "No valid pattern items after validation")
         
         # Synthesize
         audio = _drum_engine.synthesize_pattern(
@@ -290,6 +325,10 @@ async def synthesize_pattern(
             "num_hits": len(pattern_list),
         }
     
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors)
+        raise
     except Exception as e:
+        logger.error(f"Error synthesizing pattern: {str(e)}", exc_info=True)
         raise HTTPException(500, f"Error synthesizing pattern: {str(e)}")
 

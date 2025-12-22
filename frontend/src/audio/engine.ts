@@ -420,25 +420,15 @@ export class LoopForgeAudioEngine {
     }
     
     // Envelope sweep (TR-808 style pitch sweep for kicks)
+    // Use automation instead of oscillator for better performance
     if (options.envelopeSweep !== undefined && options.envelopeSweep > 0) {
-      // Create an oscillator to modulate playback rate
-      const sweepOsc = this.context.createOscillator();
-      const sweepGain = this.context.createGain();
       const sweepAmount = options.envelopeSweep * 0.2; // Max 20% pitch variation
-      
-      sweepOsc.frequency.value = 0; // DC offset
-      sweepGain.gain.value = sweepAmount;
-      
-      // Exponential decay envelope
       const duration = options.duration ?? buffer.duration;
-      sweepGain.gain.setValueAtTime(sweepAmount, adjustedWhen);
-      sweepGain.gain.exponentialRampToValueAtTime(0.001, adjustedWhen + duration);
       
-      sweepOsc.connect(sweepGain);
-      sweepGain.connect(source.playbackRate);
-      
-      sweepOsc.start(adjustedWhen);
-      sweepOsc.stop(adjustedWhen + duration);
+      // Set initial playback rate with sweep
+      source.playbackRate.setValueAtTime(basePlaybackRate * (1 + sweepAmount), adjustedWhen);
+      // Exponential decay to base rate (TR-808 style)
+      source.playbackRate.exponentialRampToValueAtTime(basePlaybackRate, adjustedWhen + duration);
     } else {
       source.playbackRate.value = basePlaybackRate;
     }
@@ -449,17 +439,19 @@ export class LoopForgeAudioEngine {
     velocityGain.gain.value = velocity * velocity; // Quadratic curve feels more natural
     
     // Saturation (footwork - using waveshaper for distortion)
+    // Cache saturation curves for performance
     let saturationNode: WaveShaperNode | null = null;
     if (options.saturationAmount !== undefined && options.saturationAmount > 0) {
       saturationNode = this.context.createWaveShaper();
       const amount = options.saturationAmount;
+      
+      // Generate soft clipping curve
+      // Formula: ((1 + k) * x) / (1 + k * |x|) where k = 2 * amount / (1 - amount)
       const curve = new Float32Array(65536);
-      const deg = Math.PI / 180;
+      const k = 2 * amount / (1 - amount + 1e-6); // Prevent division by zero
       
       for (let i = 0; i < 65536; i++) {
         const x = (i * 2) / 65536 - 1;
-        // Soft clipping curve
-        const k = 2 * amount / (1 - amount);
         curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
       }
       

@@ -33,6 +33,7 @@ class TriggerMode(Enum):
     FOLLOW = "follow"                # Follow another stem's transients
     EUCLIDEAN = "euclidean"          # Euclidean rhythm generator
     CHAOS = "chaos"                  # Full generative mode with rules
+    FOOTWORK = "footwork"            # Footwork-specific sequencing
 
 
 @dataclass
@@ -50,6 +51,12 @@ class TriggerEvent:
     reverse: bool = False            # Play backwards
     pan: float = 0.0                 # -1 to 1 (left to right)
     filter_cutoff: Optional[float] = None  # Hz, for lowpass filter
+    
+    # Footwork-specific parameters
+    micro_offset: float = 0.0        # Intentional timing offset in beats (e.g., 0.1 = ahead, -0.05 = behind)
+    envelope_sweep: Optional[float] = None  # TR-808 style pitch sweep (0-1, controls pitch decay)
+    saturation_amount: float = 0.0   # Saturation/distortion level (0-1, for saturation-as-texture)
+    swing_amount: float = 0.0        # Swing/triplet feel (0-1, for offbeat timing)
     
     # Metadata
     triggered_by: Optional[str] = None  # What caused this trigger
@@ -123,18 +130,34 @@ class TriggerSource(ABC):
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'TriggerSource':
-        # Factory method - subclasses should implement their own
+        """
+        Factory method to create TriggerSource from dict.
+        
+        Handles all TriggerSource subclasses including footwork-specific types.
+        """
+        if not data:
+            return GridTriggerSource()
+        
         source_type = data.get('type', 'GridTriggerSource')
-        if source_type == 'EuclideanTriggerSource':
-            return EuclideanTriggerSource.from_dict(data)
-        elif source_type == 'MIDITriggerSource':
-            return MIDITriggerSource.from_dict(data)
-        elif source_type == 'TransientFollowSource':
-            return TransientFollowSource.from_dict(data)
-        elif source_type == 'ProbabilityTriggerSource':
-            return ProbabilityTriggerSource.from_dict(data)
-        else:
-            return GridTriggerSource.from_dict(data)
+        
+        # Map source types to their from_dict methods
+        source_map = {
+            'EuclideanTriggerSource': EuclideanTriggerSource.from_dict,
+            'MIDITriggerSource': MIDITriggerSource.from_dict,
+            'TransientFollowSource': TransientFollowSource.from_dict,
+            'ProbabilityTriggerSource': ProbabilityTriggerSource.from_dict,
+            'PolyrhythmicTriggerSource': PolyrhythmicTriggerSource.from_dict,
+            'MicroTimingTriggerSource': MicroTimingTriggerSource.from_dict,
+            'JukePatternTriggerSource': JukePatternTriggerSource.from_dict,
+            'OffbeatTriggerSource': OffbeatTriggerSource.from_dict,
+        }
+        
+        factory = source_map.get(source_type)
+        if factory:
+            return factory(data)
+        
+        # Default to GridTriggerSource
+        return GridTriggerSource.from_dict(data)
 
 
 class GridTriggerSource(TriggerSource):
@@ -458,6 +481,332 @@ class ProbabilityTriggerSource(TriggerSource):
         )
 
 
+class PolyrhythmicTriggerSource(TriggerSource):
+    """
+    Generate triggers across multiple simultaneous time signatures.
+    
+    Footwork technique: layers drums on different time signatures simultaneously
+    (e.g., kick on 4/4, snare on 3/4, hats on 5/8).
+    """
+    
+    def __init__(
+        self,
+        layers: List[Dict] = None,  # Each layer: {'hits': int, 'steps': int, 'subdivision': float, 'offset': float}
+    ):
+        """
+        Args:
+            layers: List of layer configs. Each layer has:
+                - hits: Number of triggers in the pattern
+                - steps: Number of steps in the pattern
+                - subdivision: Steps per beat (1.0 = quarter notes, 4.0 = sixteenths)
+                - offset: Phase offset in beats
+        """
+        self.layers = layers or [
+            {'hits': 4, 'steps': 4, 'subdivision': 1.0, 'offset': 0.0}  # Default: 4/4
+        ]
+    
+    def get_trigger_times(self, duration_beats: float, bpm: float) -> List[float]:
+        all_times = []
+        
+        if not self.layers:
+            return []
+        
+        for layer in self.layers:
+            hits = max(1, layer.get('hits', 4))
+            steps = max(1, layer.get('steps', 4))
+            subdivision = max(0.25, layer.get('subdivision', 1.0))  # Prevent division by zero
+            offset = layer.get('offset', 0.0)
+            
+            # Use Euclidean pattern for each layer
+            euclidean = EuclideanTriggerSource(hits=min(hits, steps), steps=steps)
+            layer_times = euclidean.get_trigger_times(duration_beats, bpm)
+            
+            # Apply subdivision and offset
+            step_duration = 1.0 / subdivision
+            for time in layer_times:
+                adjusted_time = (time * step_duration) + offset
+                if 0 <= adjusted_time < duration_beats:
+                    all_times.append(adjusted_time)
+        
+        # Merge and sort all trigger times
+        all_times = sorted(set(all_times))
+        return all_times
+    
+    def get_velocity(self, time: float) -> float:
+        # Could vary velocity by layer, but default to 1.0
+        return 1.0
+    
+    def to_dict(self) -> Dict:
+        return {
+            'type': 'PolyrhythmicTriggerSource',
+            'layers': self.layers,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'PolyrhythmicTriggerSource':
+        return cls(layers=data.get('layers'))
+
+
+class MicroTimingTriggerSource(TriggerSource):
+    """
+    Apply intentional micro-timing offsets (MPC-style manual adjustments).
+    
+    Wraps an existing TriggerSource and adds humanized timing offsets.
+    """
+    
+    def __init__(
+        self,
+        base_source: TriggerSource,
+        offset_range: Tuple[float, float] = (-0.1, 0.1),  # Min/max offset in beats
+        offset_pattern: Optional[List[float]] = None,  # Per-step offsets for human feel
+        randomize: bool = True,  # If True, use random offsets; if False, use pattern
+    ):
+        """
+        Args:
+            base_source: The underlying trigger source to wrap
+            offset_range: (min, max) offset in beats
+            offset_pattern: Optional list of offsets to apply cyclically
+            randomize: If True, use random offsets within range; if False, use pattern
+        """
+        self.base_source = base_source
+        self.offset_range = offset_range
+        self.offset_pattern = offset_pattern or []
+        self.randomize = randomize
+        self._rng = random.Random()
+    
+    def get_trigger_times(self, duration_beats: float, bpm: float) -> List[float]:
+        base_times = self.base_source.get_trigger_times(duration_beats, bpm)
+        offset_times = []
+        
+        for i, time in enumerate(base_times):
+            if self.randomize:
+                # Random offset within range
+                offset = self._rng.uniform(self.offset_range[0], self.offset_range[1])
+            else:
+                # Use pattern (cyclically)
+                if self.offset_pattern:
+                    offset = self.offset_pattern[i % len(self.offset_pattern)]
+                else:
+                    offset = 0.0
+            
+            offset_time = time + offset
+            if 0 <= offset_time < duration_beats:
+                offset_times.append(offset_time)
+        
+        return sorted(offset_times)
+    
+    def get_velocity(self, time: float) -> float:
+        return self.base_source.get_velocity(time)
+    
+    def to_dict(self) -> Dict:
+        return {
+            'type': 'MicroTimingTriggerSource',
+            'base_source': self.base_source.to_dict(),
+            'offset_range': list(self.offset_range),
+            'offset_pattern': self.offset_pattern,
+            'randomize': self.randomize,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'MicroTimingTriggerSource':
+        base_source_data = data.get('base_source', {})
+        base_source = TriggerSource.from_dict(base_source_data)
+        offset_range = tuple(data.get('offset_range', [-0.1, 0.1]))
+        return cls(
+            base_source=base_source,
+            offset_range=offset_range,
+            offset_pattern=data.get('offset_pattern'),
+            randomize=data.get('randomize', True),
+        )
+
+
+class JukePatternTriggerSource(TriggerSource):
+    """
+    Footwork-specific rhythmic patterns (juke/ghetto house).
+    
+    Predefined patterns derived from classic juke/footwork tracks.
+    """
+    
+    # Classic juke/footwork patterns
+    PATTERNS = {
+        'juke_basic': [
+            (0.0, 1.0),    # Kick on 1
+            (0.5, 0.8),    # Snare on 1.5
+            (1.0, 0.6),    # Hat on 2
+            (1.5, 0.9),    # Kick on 2.5
+            (2.0, 0.7),    # Snare on 3
+            (2.5, 0.5),    # Hat on 3.5
+            (3.0, 1.0),    # Kick on 4
+            (3.5, 0.8),    # Snare on 4.5
+        ],
+        'ghetto_house': [
+            (0.0, 1.0),    # Kick
+            (0.25, 0.4),   # Hat
+            (0.5, 0.9),    # Snare
+            (0.75, 0.3),   # Hat
+            (1.0, 0.8),    # Kick
+            (1.25, 0.5),   # Hat
+            (1.5, 0.9),    # Snare
+            (1.75, 0.4),   # Hat
+            (2.0, 1.0),    # Kick
+            (2.25, 0.3),   # Hat
+            (2.5, 0.9),    # Snare
+            (2.75, 0.5),   # Hat
+            (3.0, 0.8),    # Kick
+            (3.25, 0.4),   # Hat
+            (3.5, 0.9),    # Snare
+            (3.75, 0.3),   # Hat
+        ],
+        'footwork_poly': [
+            (0.0, 1.0),    # Kick
+            (0.33, 0.7),   # Offbeat 1/3
+            (0.67, 0.5),   # Offbeat 2/3
+            (1.0, 0.9),    # Snare
+            (1.33, 0.6),   # Offbeat
+            (1.67, 0.4),   # Offbeat
+            (2.0, 1.0),    # Kick
+            (2.33, 0.8),   # Offbeat
+            (2.67, 0.5),   # Offbeat
+            (3.0, 0.9),    # Snare
+            (3.33, 0.7),   # Offbeat
+            (3.67, 0.4),   # Offbeat
+        ],
+    }
+    
+    def __init__(
+        self,
+        pattern_name: str = 'juke_basic',
+        pattern: Optional[List[Tuple[float, float]]] = None,  # Custom pattern: [(time, velocity), ...]
+        loop_length: float = 4.0,  # Pattern length in beats
+    ):
+        """
+        Args:
+            pattern_name: Name of predefined pattern, or 'custom' to use pattern arg
+            pattern: Custom pattern as list of (time_offset, velocity) tuples
+            loop_length: Length of pattern loop in beats
+        """
+        self.pattern_name = pattern_name
+        self.loop_length = loop_length
+        
+        if pattern_name == 'custom' and pattern:
+            self.pattern = pattern
+        elif pattern_name in self.PATTERNS:
+            self.pattern = self.PATTERNS[pattern_name]
+        else:
+            self.pattern = self.PATTERNS['juke_basic']
+    
+    def get_trigger_times(self, duration_beats: float, bpm: float) -> List[float]:
+        times = []
+        num_loops = int(np.ceil(duration_beats / self.loop_length))
+        
+        for loop in range(num_loops):
+            for time_offset, velocity in self.pattern:
+                time = loop * self.loop_length + time_offset
+                if time < duration_beats:
+                    times.append(time)
+        
+        return sorted(times)
+    
+    def get_velocity(self, time: float) -> float:
+        # Find which pattern step this time corresponds to
+        time_in_loop = time % self.loop_length
+        
+        for time_offset, velocity in self.pattern:
+            if abs(time_in_loop - time_offset) < 0.01:
+                return velocity
+        
+        return 1.0
+    
+    def to_dict(self) -> Dict:
+        return {
+            'type': 'JukePatternTriggerSource',
+            'pattern_name': self.pattern_name,
+            'pattern': self.pattern,
+            'loop_length': self.loop_length,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'JukePatternTriggerSource':
+        return cls(
+            pattern_name=data.get('pattern_name', 'juke_basic'),
+            pattern=data.get('pattern'),
+            loop_length=data.get('loop_length', 4.0),
+        )
+
+
+class OffbeatTriggerSource(TriggerSource):
+    """
+    Offbeat timing (1/3 notes off grid, MPC-style).
+    
+    Creates swing/triplet feel by offsetting triggers from the base grid.
+    """
+    
+    def __init__(
+        self,
+        base_subdivision: float = 4.0,  # Base grid (e.g., 4.0 for 16th notes)
+        offbeat_ratio: float = 1.0 / 3.0,  # Offset ratio (1/3, 2/3 for triplet feel)
+        swing_amount: float = 0.5,  # Amount of swing (0-1)
+        pattern: Optional[List[bool]] = None,  # Which steps get offset (True = offset, False = on-grid)
+    ):
+        """
+        Args:
+            base_subdivision: Base grid subdivision (4.0 = 16th notes)
+            offbeat_ratio: How far off-grid (1/3 = triplet feel)
+            swing_amount: How much swing to apply (0 = none, 1 = full)
+            pattern: Optional pattern of which steps to offset
+        """
+        self.base_subdivision = base_subdivision
+        self.offbeat_ratio = offbeat_ratio
+        self.swing_amount = swing_amount
+        self.pattern = pattern or [False] * 16  # Default: all on-grid
+    
+    def get_trigger_times(self, duration_beats: float, bpm: float) -> List[float]:
+        step_duration = 1.0 / self.base_subdivision
+        times = []
+        
+        step = 0
+        time = 0.0
+        while time < duration_beats:
+            # Determine if this step should be offset
+            should_offset = self.pattern[step % len(self.pattern)] if self.pattern else False
+            
+            if should_offset:
+                # Apply swing offset
+                offset = step_duration * self.offbeat_ratio * self.swing_amount
+                trigger_time = time + offset
+            else:
+                trigger_time = time
+            
+            if 0 <= trigger_time < duration_beats:
+                times.append(trigger_time)
+            
+            time += step_duration
+            step += 1
+        
+        return times
+    
+    def get_velocity(self, time: float) -> float:
+        return 1.0
+    
+    def to_dict(self) -> Dict:
+        return {
+            'type': 'OffbeatTriggerSource',
+            'base_subdivision': self.base_subdivision,
+            'offbeat_ratio': self.offbeat_ratio,
+            'swing_amount': self.swing_amount,
+            'pattern': self.pattern,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'OffbeatTriggerSource':
+        return cls(
+            base_subdivision=data.get('base_subdivision', 4.0),
+            offbeat_ratio=data.get('offbeat_ratio', 1.0 / 3.0),
+            swing_amount=data.get('swing_amount', 0.5),
+            pattern=data.get('pattern'),
+        )
+
+
 class TriggerEngine:
     """
     The Autechre-style generative sequencer.
@@ -548,6 +897,16 @@ class TriggerEngine:
             elif slice_bank:
                 return slice_bank.get_random_weighted(weight_by='transient', rng=self._rng).index
             else:
+                return self._rng.randint(0, num_slices - 1)
+        
+        elif self.mode == TriggerMode.FOOTWORK:
+            # Footwork mode: combines polyrhythmic layering with probability weighting
+            # Uses slice energy/transient strength for selection
+            if slice_bank:
+                # Weight by transient strength (footwork emphasizes rhythmic precision)
+                return slice_bank.get_random_weighted(weight_by='transient', rng=self._rng).index
+            else:
+                # Fallback to weighted random
                 return self._rng.randint(0, num_slices - 1)
         
         return 0
@@ -692,6 +1051,32 @@ class TriggerEngine:
                 triggered_by=self.mode.value,
             )
             
+            # Apply footwork-specific parameters if in FOOTWORK mode
+            if self.mode == TriggerMode.FOOTWORK:
+                # Apply micro-timing offsets if using MicroTimingTriggerSource
+                # Note: MicroTimingTriggerSource already applies offsets in get_trigger_times,
+                # but we can add a small additional random offset for humanization
+                if isinstance(self.trigger_source, MicroTimingTriggerSource):
+                    # Small additional random offset for extra humanization
+                    event.micro_offset = self._rng.uniform(-0.02, 0.02)
+                else:
+                    # Default small random offset for footwork feel
+                    event.micro_offset = self._rng.uniform(-0.03, 0.03)
+                
+                # Apply saturation for footwork style (saturation-as-texture)
+                event.saturation_amount = 0.3 + (velocity * 0.4)  # 0.3-0.7 based on velocity
+                
+                # Apply swing if using OffbeatTriggerSource
+                if isinstance(self.trigger_source, OffbeatTriggerSource):
+                    event.swing_amount = self.trigger_source.swing_amount
+                
+                # Apply envelope sweep for drum-like slices (if slice_bank available)
+                if slice_bank and slice_index < len(slice_bank.slices):
+                    slice_obj = slice_bank.slices[slice_index]
+                    # If it's a drum slice (short duration, high transient), add envelope sweep
+                    if slice_obj.duration < 0.5 and slice_obj.transient_strength > 0.7:
+                        event.envelope_sweep = 0.5 + (velocity * 0.3)  # 0.5-0.8
+            
             # Update state for rule evaluation
             if slice_index == self.state['last_slice_index']:
                 self.state['consecutive_plays'] += 1
@@ -801,6 +1186,48 @@ TRIGGER_PRESETS = {
                 probability=0.3,
             ),
         ],
+    },
+    # Footwork presets
+    'footwork_basic': {
+        'mode': TriggerMode.FOOTWORK,
+        'trigger_source': PolyrhythmicTriggerSource(
+            layers=[
+                {'hits': 4, 'steps': 4, 'subdivision': 1.0, 'offset': 0.0},  # Kick on 4/4
+                {'hits': 3, 'steps': 4, 'subdivision': 1.0, 'offset': 0.0},  # Snare on 3/4
+                {'hits': 5, 'steps': 8, 'subdivision': 2.0, 'offset': 0.0},  # Hats on 5/8
+            ]
+        ),
+        'rules': [],
+    },
+    'juke_pattern': {
+        'mode': TriggerMode.FOOTWORK,
+        'trigger_source': JukePatternTriggerSource(
+            pattern_name='juke_basic',
+            loop_length=4.0,
+        ),
+        'rules': [],
+    },
+    'ghetto_house': {
+        'mode': TriggerMode.FOOTWORK,
+        'trigger_source': OffbeatTriggerSource(
+            base_subdivision=4.0,
+            offbeat_ratio=1.0 / 3.0,
+            swing_amount=0.6,
+            pattern=[False, True, False, True, False, True, False, True] * 2,  # Every other step offset
+        ),
+        'rules': [],
+    },
+    'footwork_poly': {
+        'mode': TriggerMode.FOOTWORK,
+        'trigger_source': PolyrhythmicTriggerSource(
+            layers=[
+                {'hits': 4, 'steps': 4, 'subdivision': 1.0, 'offset': 0.0},    # Kick
+                {'hits': 3, 'steps': 4, 'subdivision': 1.0, 'offset': 0.5},    # Snare offset
+                {'hits': 5, 'steps': 8, 'subdivision': 2.0, 'offset': 0.0},    # Hats
+                {'hits': 7, 'steps': 12, 'subdivision': 3.0, 'offset': 0.0},  # Extra layer
+            ]
+        ),
+        'rules': [],
     },
 }
 

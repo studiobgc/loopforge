@@ -25,6 +25,11 @@ export interface SlicePlaybackOptions {
   filterResonance?: number; // 0-1
   startOffset?: number;     // seconds into slice
   duration?: number;        // playback duration (null = full)
+  // Footwork-specific parameters
+  microOffset?: number;     // Timing offset in beats (for micro-timing)
+  envelopeSweep?: number;    // TR-808 style pitch sweep (0-1)
+  saturationAmount?: number; // Saturation/distortion level (0-1)
+  swingAmount?: number;     // Swing/triplet feel (0-1)
 }
 
 export interface ScheduledTrigger {
@@ -396,19 +401,71 @@ export class LoopForgeAudioEngine {
     
     const voiceId = `${bankId}_${sliceIndex}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
+    // Apply micro-timing offset (footwork)
+    let adjustedWhen = when;
+    if (options.microOffset !== undefined && options.microOffset !== 0) {
+      // Convert beat offset to seconds
+      const beatDuration = 60.0 / this._bpm;
+      adjustedWhen = when + (options.microOffset * beatDuration);
+    }
+    
     // Create voice chain: Source → Gain → Filter → Pan → Master
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     
     // Pitch shift via playback rate
+    let basePlaybackRate = 1.0;
     if (options.pitchShift) {
-      source.playbackRate.value = Math.pow(2, options.pitchShift / 12);
+      basePlaybackRate = Math.pow(2, options.pitchShift / 12);
+    }
+    
+    // Envelope sweep (TR-808 style pitch sweep for kicks)
+    if (options.envelopeSweep !== undefined && options.envelopeSweep > 0) {
+      // Create an oscillator to modulate playback rate
+      const sweepOsc = this.context.createOscillator();
+      const sweepGain = this.context.createGain();
+      const sweepAmount = options.envelopeSweep * 0.2; // Max 20% pitch variation
+      
+      sweepOsc.frequency.value = 0; // DC offset
+      sweepGain.gain.value = sweepAmount;
+      
+      // Exponential decay envelope
+      const duration = options.duration ?? buffer.duration;
+      sweepGain.gain.setValueAtTime(sweepAmount, adjustedWhen);
+      sweepGain.gain.exponentialRampToValueAtTime(0.001, adjustedWhen + duration);
+      
+      sweepOsc.connect(sweepGain);
+      sweepGain.connect(source.playbackRate);
+      
+      sweepOsc.start(adjustedWhen);
+      sweepOsc.stop(adjustedWhen + duration);
+    } else {
+      source.playbackRate.value = basePlaybackRate;
     }
     
     // Velocity → Gain
     const velocityGain = this.context.createGain();
     const velocity = options.velocity ?? 1;
     velocityGain.gain.value = velocity * velocity; // Quadratic curve feels more natural
+    
+    // Saturation (footwork - using waveshaper for distortion)
+    let saturationNode: WaveShaperNode | null = null;
+    if (options.saturationAmount !== undefined && options.saturationAmount > 0) {
+      saturationNode = this.context.createWaveShaper();
+      const amount = options.saturationAmount;
+      const curve = new Float32Array(65536);
+      const deg = Math.PI / 180;
+      
+      for (let i = 0; i < 65536; i++) {
+        const x = (i * 2) / 65536 - 1;
+        // Soft clipping curve
+        const k = 2 * amount / (1 - amount);
+        curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
+      }
+      
+      saturationNode.curve = curve;
+      saturationNode.oversample = '4x';
+    }
     
     // Filter (optional)
     let filterNode: BiquadFilterNode | null = null;
@@ -428,21 +485,29 @@ export class LoopForgeAudioEngine {
     const attack = options.attack ?? 0.002;
     const release = options.release ?? 0.01;
     
-    // Attack
-    envelopeGain.gain.setValueAtTime(0, when);
-    envelopeGain.gain.linearRampToValueAtTime(1, when + attack);
+    // Attack (use adjusted time for micro-timing)
+    envelopeGain.gain.setValueAtTime(0, adjustedWhen);
+    envelopeGain.gain.linearRampToValueAtTime(1, adjustedWhen + attack);
     
     // Release (schedule at end of playback)
     const duration = options.duration ?? buffer.duration;
-    const releaseStart = when + duration - release;
-    if (releaseStart > when + attack) {
+    const releaseStart = adjustedWhen + duration - release;
+    if (releaseStart > adjustedWhen + attack) {
       envelopeGain.gain.setValueAtTime(1, releaseStart);
-      envelopeGain.gain.linearRampToValueAtTime(0, when + duration);
+      envelopeGain.gain.linearRampToValueAtTime(0, adjustedWhen + duration);
     }
     
-    // Connect chain
+    // Connect chain with saturation
     source.connect(velocityGain);
-    if (filterNode) {
+    if (saturationNode) {
+      velocityGain.connect(saturationNode);
+      if (filterNode) {
+        saturationNode.connect(filterNode);
+        filterNode.connect(panner);
+      } else {
+        saturationNode.connect(panner);
+      }
+    } else if (filterNode) {
       velocityGain.connect(filterNode);
       filterNode.connect(panner);
     } else {
@@ -451,9 +516,9 @@ export class LoopForgeAudioEngine {
     panner.connect(envelopeGain);
     envelopeGain.connect(this.masterGain);
     
-    // Start playback
+    // Start playback (using adjusted time for micro-timing)
     const startOffset = options.startOffset ?? 0;
-    source.start(when, startOffset, options.duration);
+    source.start(adjustedWhen, startOffset, options.duration);
     
     // Track voice
     this.activeVoices.set(voiceId, source);

@@ -22,6 +22,7 @@ import {
   Trash2,
   RotateCcw,
   HelpCircle,
+  Layers,
 } from 'lucide-react';
 import { sliceApi, TriggerEvent, TriggerMode, TriggerRule, TriggerPreset } from '../../api/sliceApi';
 import * as Tone from 'tone';
@@ -71,6 +72,7 @@ const ModeIcon: React.FC<{ mode: TriggerMode }> = ({ mode }) => {
     case 'probability': return <Waves className="w-4 h-4" />;
     case 'follow': return <Link2 className="w-4 h-4" />;
     case 'chaos': return <Zap className="w-4 h-4" />;
+    case 'footwork': return <Layers className="w-4 h-4" />;
     default: return <Grid3X3 className="w-4 h-4" />;
   }
 };
@@ -646,6 +648,7 @@ export const SliceSequencer: React.FC<SliceSequencerProps> = ({
             { mode: 'probability' as TriggerMode, tip: 'Weighted random' },
             { mode: 'follow' as TriggerMode, tip: 'Mirror another stem' },
             { mode: 'chaos' as TriggerMode, tip: 'Rule-based mutations' },
+            { mode: 'footwork' as TriggerMode, tip: 'Footwork polyrhythmic patterns' },
           ]).map(({ mode: m, tip }) => (
             <button
               key={m}
@@ -742,6 +745,43 @@ export const SliceSequencer: React.FC<SliceSequencerProps> = ({
                     1/{sub === 1 ? '4' : sub === 2 ? '8' : sub === 4 ? '16' : '32'}
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {mode === 'footwork' && (
+            <div className="space-y-3 p-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
+              <div className="text-xs text-zinc-400 mb-2">
+                Footwork Mode: Polyrhythmic patterns with micro-timing
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Saturation</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    defaultValue="0.3"
+                    className="w-full"
+                    title="Saturation amount (0-1)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Swing</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    defaultValue="0.0"
+                    className="w-full"
+                    title="Swing amount (0-1)"
+                  />
+                </div>
+              </div>
+              <div className="text-xs text-zinc-500">
+                Use presets below for classic footwork patterns
               </div>
             </div>
           )}

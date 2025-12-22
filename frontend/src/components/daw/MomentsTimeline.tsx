@@ -1,10 +1,10 @@
 /**
- * MomentsTimeline - Octatrack-style moment navigation for long samples
+ * MomentsTimeline - Manual region selection for long samples
  * 
  * Features:
- * - Visual timeline showing detected moments (hits, phrases, textures, changes)
- * - Click moment → jump to that region
- * - Mark In/Out for manual region selection
+ * - Visual timeline with waveform reference
+ * - Click timeline to set Mark In, shift-click for Mark Out
+ * - Full manual control over region selection
  * - "Send to Pads" to create slice bank from region
  */
 
@@ -140,11 +140,8 @@ export const MomentsTimeline: React.FC<MomentsTimelineProps> = ({
     return stats;
   }, [moments]);
 
-  // Handle moment click - jump to that time
+  // Handle moment click - just highlight it, don't auto-select region
   const handleMomentClick = useCallback((moment: Moment) => {
-    // Set mark in/out to this moment's region
-    setMarkIn(moment.start_time);
-    setMarkOut(moment.end_time);
     setPreviewMoment(moment);
   }, []);
 
@@ -443,7 +440,7 @@ export const MomentsTimeline: React.FC<MomentsTimelineProps> = ({
 
           {/* Instructions */}
           <div className="text-[9px] text-zinc-600 border-t border-zinc-800 pt-2">
-            Click timeline to set Mark In • Shift+click to set Mark Out • Click moment to select region
+            Click timeline to set Mark In • Shift+click to set Mark Out
           </div>
         </div>
       )}

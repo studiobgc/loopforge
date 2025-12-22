@@ -2,11 +2,10 @@
  * SliceGrid - Interactive slice pad with real playback
  * 
  * Features:
- * - Click/tap to play slices with velocity sensitivity
+ * - Click/tap to play slices
  * - Drag to reorder
  * - Visual feedback during playback
  * - Energy/transient visualization per slice
- * - MIDI-style velocity (click position = velocity)
  * - Keyboard triggers (1-8, Q-I for 16 pads)
  * - Cross-stem trigger visualization
  */
@@ -104,7 +103,6 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
 }) => {
   const [playingSlices, setPlayingSlices] = useState<Set<number>>(new Set());
   const [hoveredSlice, setHoveredSlice] = useState<number | null>(null);
-  const [sliceVelocities, setSliceVelocities] = useState<Map<number, number>>(new Map());
   const gridRef = useRef<HTMLDivElement>(null);
   const audioEngine = useRef(getAudioEngine());
   const hoverTimerRef = useRef<number | null>(null);
@@ -112,29 +110,20 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
   
   const colors = ROLE_COLORS[stemRole];
   
-  // Calculate velocity from click position within pad
-  const getVelocityFromEvent = useCallback((e: React.MouseEvent, rect: DOMRect): number => {
-    // Click higher = louder (like MPC pads)
-    const y = e.clientY - rect.top;
-    const normalizedY = 1 - (y / rect.height);  // 0 at bottom, 1 at top
-    return 0.3 + normalizedY * 0.7;  // 0.3 to 1.0 range
-  }, []);
-  
   // Play a slice
-  const playSlice = useCallback((index: number, velocity: number = 0.8) => {
+  const playSlice = useCallback((index: number) => {
     const slice = slices[index];
     if (!slice) return;
     
     // Trigger in audio engine
     audioEngine.current.triggerSlice(stemId, index, {
-      velocity,
+      velocity: 0.85,
       pitch: 0,
       pan: 0,
     });
     
-    // Visual feedback with velocity
+    // Visual feedback
     setPlayingSlices(prev => new Set(prev).add(index));
-    setSliceVelocities(prev => new Map(prev).set(index, velocity));
     
     const feedbackDuration = Math.min(slice.duration * 1000, 300);
     setTimeout(() => {
@@ -143,15 +132,10 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
         next.delete(index);
         return next;
       });
-      setSliceVelocities(prev => {
-        const next = new Map(prev);
-        next.delete(index);
-        return next;
-      });
     }, feedbackDuration);
     
     // Callbacks
-    onSlicePlay?.(index, velocity);
+    onSlicePlay?.(index, 0.85);
   }, [slices, stemId, onSlicePlay]);
   
   // Keyboard handler - DISABLED: DAWWorkspace handles keyboard input to avoid duplicate triggers
@@ -221,7 +205,6 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
         const isHovered = hoveredSlice === index;
         const keyHint = getKeyHint(index);
         const probability = sliceProbabilities[index] ?? 1;
-        const velocity = sliceVelocities.get(index) ?? 0;
         
         return (
           <div
@@ -242,10 +225,8 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
               // Pressed state
               'active:scale-95 active:brightness-90',
             )}
-            onMouseDown={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const velocity = getVelocityFromEvent(e, rect);
-              playSlice(index, velocity);
+            onMouseDown={() => {
+              playSlice(index);
               onSliceSelect?.(index);
             }}
             onMouseEnter={() => {
@@ -305,34 +286,8 @@ export const SliceGrid: React.FC<SliceGridProps> = ({
               </div>
             )}
             
-            {/* Velocity ripple effect when playing */}
-            {isPlaying && velocity > 0 && (
-              <div 
-                className="absolute inset-0 rounded-xl pointer-events-none animate-ping"
-                style={{
-                  backgroundColor: 'rgba(255,255,255,0.3)',
-                  animationDuration: `${200 + (1 - velocity) * 200}ms`,
-                  animationIterationCount: 1,
-                }}
-              />
-            )}
-            
             {/* Center content area */}
             <div className="absolute inset-0 flex items-center justify-center">
-              {/* Velocity indicator when playing */}
-              {isPlaying && velocity > 0 && (
-                <div 
-                  className="absolute text-white font-bold text-lg drop-shadow-lg animate-bounce"
-                  style={{
-                    animationDuration: '150ms',
-                    animationIterationCount: 1,
-                    transform: `scale(${0.8 + velocity * 0.4})`,
-                  }}
-                >
-                  {Math.round(velocity * 100)}
-                </div>
-              )}
-              
               {/* Transient strength indicator */}
               {!isPlaying && slice.transientStrength > 0.5 && !showProbabilities && (
                 <div className={cn(

@@ -40,19 +40,35 @@ class EvolutionEngine:
         
         # 1. DRUMS / PERCUSSION
         if any(t in tags for t in ['drums', 'percussion', 'kick', 'snare', 'hats']):
-            print("[EVOLUTION] Applying 'Punchy Drums' recipe")
-            board.append(HighpassFilter(cutoff_frequency_hz=30)) # Cleanup rumble
-            board.append(Compressor(threshold_db=-12, ratio=4, attack_ms=10, release_ms=100)) # Punch
-            board.append(Distortion(drive_db=3)) # Saturation
-            board.append(Limiter(threshold_db=-1.0))
+            # Check for footwork-specific tags
+            if any(t in tags for t in ['footwork', 'juke', 'ghetto_house']):
+                print("[EVOLUTION] Applying 'Footwork Drums' recipe (saturation-as-texture)")
+                board.append(HighpassFilter(cutoff_frequency_hz=30)) # Cleanup rumble
+                board.append(Compressor(threshold_db=-15, ratio=6, attack_ms=5, release_ms=80)) # Aggressive punch
+                board.append(Distortion(drive_db=12)) # Heavy saturation (saturation-as-texture)
+                board.append(Limiter(threshold_db=-1.0))
+            else:
+                print("[EVOLUTION] Applying 'Punchy Drums' recipe")
+                board.append(HighpassFilter(cutoff_frequency_hz=30)) # Cleanup rumble
+                board.append(Compressor(threshold_db=-12, ratio=4, attack_ms=10, release_ms=100)) # Punch
+                board.append(Distortion(drive_db=3)) # Saturation
+                board.append(Limiter(threshold_db=-1.0))
             
         # 2. BASS
         elif any(t in tags for t in ['bass', '808', 'sub']):
-            print("[EVOLUTION] Applying 'Thick Bass' recipe")
-            board.append(Distortion(drive_db=6)) # Warmth
-            board.append(Chorus(rate_hz=0.5, depth=0.2, mix=0.3)) # Width
-            board.append(Compressor(threshold_db=-10, ratio=3)) # Glue
-            board.append(LowpassFilter(cutoff_frequency_hz=5000)) # Focus
+            # Check for footwork-specific tags
+            if any(t in tags for t in ['footwork', 'juke', 'ghetto_house']):
+                print("[EVOLUTION] Applying 'Footwork Bass' recipe (808-style saturation)")
+                board.append(Distortion(drive_db=15)) # Heavy saturation (808-style)
+                board.append(Compressor(threshold_db=-12, ratio=5, attack_ms=3, release_ms=50)) # Tight compression
+                board.append(LowpassFilter(cutoff_frequency_hz=4000)) # Focus low-end
+                board.append(Limiter(threshold_db=-1.0))
+            else:
+                print("[EVOLUTION] Applying 'Thick Bass' recipe")
+                board.append(Distortion(drive_db=6)) # Warmth
+                board.append(Chorus(rate_hz=0.5, depth=0.2, mix=0.3)) # Width
+                board.append(Compressor(threshold_db=-10, ratio=3)) # Glue
+                board.append(LowpassFilter(cutoff_frequency_hz=5000)) # Focus
             
         # 3. VOCALS
         elif any(t in tags for t in ['vocals', 'voice', 'acapella', 'speech']):
@@ -83,7 +99,15 @@ class EvolutionEngine:
             board.append(LowpassFilter(cutoff_frequency_hz=1500))
             board.append(Reverb(room_size=0.8, wet_level=0.4))
             
-        # 7. DEFAULT (Generic Polish)
+        # 7. FOOTWORK / GHETTO HOUSE (Raw, minimal processing)
+        elif any(t in tags for t in ['footwork', 'juke', 'ghetto_house']):
+            print("[EVOLUTION] Applying 'Ghetto House Raw' recipe (minimal processing, maximum rawness)")
+            # Minimal processing - just saturation and light compression
+            board.append(Distortion(drive_db=8)) # Raw saturation
+            board.append(Compressor(threshold_db=-8, ratio=2, attack_ms=20, release_ms=100)) # Light glue
+            # No reverb, no fancy effects - keep it raw
+        
+        # 8. DEFAULT (Generic Polish)
         else:
             print("[EVOLUTION] Applying 'General Polish' recipe")
             board.append(Compressor(threshold_db=-10, ratio=2))

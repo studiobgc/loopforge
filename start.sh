@@ -71,7 +71,7 @@ npm run dev &
 FRONTEND_PID=$!
 
 echo ""
-echo "▶ LoopForge running at: http://localhost:$LOOPFORGE_FRONTEND_PORT"
+echo "▶ LoopForge running at: http://loopforge.local:$LOOPFORGE_FRONTEND_PORT"
 echo "▶ Press Ctrl+C to stop"
 echo ""
 

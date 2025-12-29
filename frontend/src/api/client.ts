@@ -138,7 +138,12 @@ class LoopForgeClient {
    */
   async upload(
     file: File,
-    options: { autoSeparate?: boolean; autoAnalyze?: boolean; previewDuration?: number } = {}
+    options: { 
+      autoSeparate?: boolean; 
+      autoAnalyze?: boolean; 
+      previewDuration?: number;
+      onProgress?: (percent: number) => void;
+    } = {}
   ): Promise<{
     session_id: string;
     filename: string;
@@ -155,6 +160,12 @@ class LoopForgeClient {
 
     const response = await this.http.post('/api/sessions/upload', formData, {
       timeout: 600000,
+      onUploadProgress: (progressEvent) => {
+        if (options.onProgress && progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+          options.onProgress(percent);
+        }
+      },
     });
     return response.data;
   }

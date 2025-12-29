@@ -52,6 +52,84 @@ type EngineState = 'suspended' | 'running' | 'closed';
 // AUDIO ENGINE
 // =============================================================================
 
+// =============================================================================
+// PER-STEM FX CHAIN
+// =============================================================================
+
+export interface StemFxSettings {
+  enabled: boolean;
+  preset: string;  // 'none' | 'bladee_classic' | 'glitch_artifact' | etc.
+  // Individual parameters (used when preset = 'custom')
+  formantShift: number;      // semitones (-24 to +24)
+  compression: number;       // 0-1 (maps to ratio 1-12)
+  saturation: number;        // 0-1
+  bitcrushRate: number;      // 6000-44100 Hz
+  phaseSmear: number;        // 0-1
+  pitchWobble: number;       // 0-1
+  doubleTrackDetune: number; // 0-50 cents
+}
+
+const DEFAULT_FX_SETTINGS: StemFxSettings = {
+  enabled: false,
+  preset: 'none',
+  formantShift: 0,
+  compression: 0,
+  saturation: 0,
+  bitcrushRate: 44100,
+  phaseSmear: 0,
+  pitchWobble: 0,
+  doubleTrackDetune: 0,
+};
+
+// Preset configurations
+const FX_PRESETS: Record<string, Partial<StemFxSettings>> = {
+  'none': { enabled: false },
+  'bladee_classic': {
+    enabled: true,
+    formantShift: 2,
+    compression: 0.5,
+    saturation: 0.25,
+    doubleTrackDetune: 8,
+  },
+  'yeat_rage': {
+    enabled: true,
+    formantShift: -2,
+    compression: 0.8,
+    saturation: 0.35,
+    doubleTrackDetune: 5,
+  },
+  'glitch_artifact': {
+    enabled: true,
+    formantShift: -5,
+    compression: 0.9,
+    saturation: 0.6,
+    bitcrushRate: 11025,
+    phaseSmear: 0.4,
+  },
+  'ghost_voice': {
+    enabled: true,
+    formantShift: 7,
+    compression: 0.2,
+    saturation: 0.2,
+    phaseSmear: 0.6,
+    doubleTrackDetune: 12,
+  },
+};
+
+interface StemFxChain {
+  input: GainNode;
+  output: GainNode;
+  dryGain: GainNode;
+  wetGain: GainNode;
+  compressor: DynamicsCompressorNode;
+  waveshaper: WaveShaperNode;
+  formantFilter: BiquadFilterNode;
+  lowpass: BiquadFilterNode;  // For bitcrushing approximation
+  delay: DelayNode;           // For doubling effect
+  delayGain: GainNode;
+  settings: StemFxSettings;
+}
+
 export class LoopForgeAudioEngine {
   private context: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -59,6 +137,9 @@ export class LoopForgeAudioEngine {
   private masterLimiter: DynamicsCompressorNode | null = null;
   private analyser: AnalyserNode | null = null;
   private initPromise: Promise<void> | null = null;
+  
+  // Per-stem FX chains
+  private stemFxChains: Map<string, StemFxChain> = new Map();
   
   // Slice buffer storage
   private sliceBuffers: Map<string, AudioBuffer[]> = new Map();
@@ -102,7 +183,16 @@ export class LoopForgeAudioEngine {
   private _isPlaying = false;
   private _currentBeat = 0;
   private _playStartTime = 0;
+  // @ts-ignore - Reserved for future use
   private _masterEffectsEnabled = false;
+  
+  // Global FX bypass for A/B comparison
+  private _globalFxBypass = false;
+  
+  // Mute/Solo state per stem
+  private stemMuteState: Map<string, boolean> = new Map();
+  private stemSoloState: Map<string, boolean> = new Map();
+  private stemVolumeState: Map<string, number> = new Map();
   
   // =============================================================================
   // INITIALIZATION
@@ -472,21 +562,27 @@ export class LoopForgeAudioEngine {
     const panner = this.context.createStereoPanner();
     panner.pan.value = options.pan ?? 0;
     
-    // Envelope (attack/release)
+    // Envelope (attack/release) - SNAPPY by default, only use envelope if explicitly requested
     const envelopeGain = this.context.createGain();
-    const attack = options.attack ?? 0.002;
-    const release = options.release ?? 0.01;
-    
-    // Attack (use adjusted time for micro-timing)
-    envelopeGain.gain.setValueAtTime(0, adjustedWhen);
-    envelopeGain.gain.linearRampToValueAtTime(1, adjustedWhen + attack);
-    
-    // Release (schedule at end of playback)
+    const attack = options.attack ?? 0.001;  // Minimal attack for click-free start
+    const release = options.release ?? 0;    // NO release by default = snappy one-shot
     const duration = options.duration ?? buffer.duration;
-    const releaseStart = adjustedWhen + duration - release;
-    if (releaseStart > adjustedWhen + attack) {
-      envelopeGain.gain.setValueAtTime(1, releaseStart);
-      envelopeGain.gain.linearRampToValueAtTime(0, adjustedWhen + duration);
+    
+    if (attack > 0 || release > 0) {
+      // Only apply envelope if attack or release is specified
+      envelopeGain.gain.setValueAtTime(0, adjustedWhen);
+      envelopeGain.gain.linearRampToValueAtTime(1, adjustedWhen + attack);
+      
+      if (release > 0) {
+        const releaseStart = adjustedWhen + duration - release;
+        if (releaseStart > adjustedWhen + attack) {
+          envelopeGain.gain.setValueAtTime(1, releaseStart);
+          envelopeGain.gain.linearRampToValueAtTime(0, adjustedWhen + duration);
+        }
+      }
+    } else {
+      // No envelope = instant full volume (snappy)
+      envelopeGain.gain.value = 1;
     }
     
     // Connect chain with saturation
@@ -822,11 +918,12 @@ export class LoopForgeAudioEngine {
   
   /**
    * Play a full stem buffer (for transport playback)
+   * Routes through FX chain if one exists for this stem
    */
   playStem(
     stemId: string,
     buffer: AudioBuffer,
-    options: { volume?: number; muted?: boolean; startOffset?: number } = {}
+    options: { volume?: number; muted?: boolean; startOffset?: number; useFx?: boolean } = {}
   ): void {
     if (!this.context || !this.masterGain) return;
     
@@ -841,9 +938,18 @@ export class LoopForgeAudioEngine {
     const gain = this.context.createGain();
     gain.gain.value = options.muted ? 0 : (options.volume ?? 1);
     
-    // Connect: Source → Gain → Master
-    source.connect(gain);
-    gain.connect(this.masterGain);
+    // Get or create FX chain for this stem
+    const fxChain = options.useFx !== false ? this.getOrCreateStemFxChain(stemId) : null;
+    
+    if (fxChain) {
+      // Connect: Source → Gain → FX Chain Input (FX chain output goes to master)
+      source.connect(gain);
+      gain.connect(fxChain.input);
+    } else {
+      // Connect: Source → Gain → Master (bypass FX)
+      source.connect(gain);
+      gain.connect(this.masterGain);
+    }
     
     // Store references
     this.stemSources.set(stemId, source);
@@ -858,6 +964,82 @@ export class LoopForgeAudioEngine {
       this.stemSources.delete(stemId);
       this.stemGains.delete(stemId);
     };
+  }
+  
+  /**
+   * Play a region of audio with FX processing.
+   * Used for moment/slice preview with effects applied.
+   */
+  async playRegionWithFx(
+    stemId: string,
+    audioUrl: string,
+    startTime: number,
+    endTime: number,
+    options: { preset?: string; volume?: number } = {}
+  ): Promise<string | null> {
+    if (!this.context || !this.masterGain) return null;
+    
+    // Get or create FX chain
+    const fxChain = this.getOrCreateStemFxChain(stemId);
+    if (!fxChain) return null;
+    
+    // Load preset if specified
+    if (options.preset && options.preset !== 'none') {
+      this.loadStemFxPreset(stemId, options.preset);
+    }
+    
+    // Fetch and decode audio
+    try {
+      const response = await fetch(audioUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await this.context.decodeAudioData(arrayBuffer);
+      
+      // Calculate sample offsets
+      const sampleRate = audioBuffer.sampleRate;
+      const startSample = Math.floor(startTime * sampleRate);
+      const endSample = Math.min(Math.floor(endTime * sampleRate), audioBuffer.length);
+      const regionLength = endSample - startSample;
+      
+      if (regionLength <= 0) return null;
+      
+      // Create a buffer for just the region
+      const regionBuffer = this.context.createBuffer(
+        audioBuffer.numberOfChannels,
+        regionLength,
+        sampleRate
+      );
+      
+      for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+        const sourceData = audioBuffer.getChannelData(ch);
+        const destData = regionBuffer.getChannelData(ch);
+        for (let i = 0; i < regionLength; i++) {
+          destData[i] = sourceData[startSample + i];
+        }
+      }
+      
+      // Create source and connect through FX
+      const source = this.context.createBufferSource();
+      source.buffer = regionBuffer;
+      
+      const voiceGain = this.context.createGain();
+      voiceGain.gain.value = options.volume ?? 1;
+      
+      source.connect(voiceGain);
+      voiceGain.connect(fxChain.input);
+      
+      const voiceId = `region_${stemId}_${Date.now()}`;
+      this.activeVoices.set(voiceId, source);
+      
+      source.start();
+      source.onended = () => {
+        this.activeVoices.delete(voiceId);
+      };
+      
+      return voiceId;
+    } catch (e) {
+      console.error('[AudioEngine] Failed to play region with FX:', e);
+      return null;
+    }
   }
   
   /**
@@ -886,14 +1068,22 @@ export class LoopForgeAudioEngine {
   }
   
   /**
-   * Update stem volume in real-time
+   * Update stem volume in real-time (also updates FX chain output)
    */
   setStemVolume(stemId: string, volume: number, muted: boolean = false): void {
+    // Update stem gain node
     const gain = this.stemGains.get(stemId);
     if (gain && this.context) {
       const targetValue = muted ? 0 : Math.max(0, Math.min(1, volume));
       gain.gain.setTargetAtTime(targetValue, this.context.currentTime, 0.02);
     }
+    
+    // Track state for FX chain routing
+    this.stemVolumeState.set(stemId, volume);
+    this.stemMuteState.set(stemId, muted);
+    
+    // Also update FX chain output if it exists
+    this.updateStemOutputGain(stemId);
   }
   
   /**
@@ -1158,6 +1348,276 @@ export class LoopForgeAudioEngine {
   // CLEANUP
   // =============================================================================
   
+  // =============================================================================
+  // PER-STEM FX CHAIN MANAGEMENT
+  // =============================================================================
+  
+  /**
+   * Create or get an FX chain for a stem.
+   * The chain processes audio: input → compression → saturation → formant → lowpass → delay → output
+   */
+  getOrCreateStemFxChain(stemId: string): StemFxChain | null {
+    if (!this.context || !this.masterGain) return null;
+    
+    // Return existing chain
+    if (this.stemFxChains.has(stemId)) {
+      return this.stemFxChains.get(stemId)!;
+    }
+    
+    const ctx = this.context;
+    
+    // Create FX chain nodes
+    const input = ctx.createGain();
+    const output = ctx.createGain();
+    const dryGain = ctx.createGain();
+    const wetGain = ctx.createGain();
+    
+    // Compressor
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 10;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
+    
+    // Waveshaper for saturation
+    const waveshaper = ctx.createWaveShaper();
+    waveshaper.curve = this.createSaturationCurve(0);
+    waveshaper.oversample = '2x';
+    
+    // Formant approximation (peaking filter)
+    const formantFilter = ctx.createBiquadFilter();
+    formantFilter.type = 'peaking';
+    formantFilter.frequency.value = 2500;
+    formantFilter.Q.value = 2;
+    formantFilter.gain.value = 0;
+    
+    // Lowpass for bitcrushing approximation
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = 20000;
+    lowpass.Q.value = 0.7;
+    
+    // Delay for doubling effect
+    const delay = ctx.createDelay(0.1);
+    delay.delayTime.value = 0.015;
+    const delayGain = ctx.createGain();
+    delayGain.gain.value = 0;
+    
+    // Connect chain
+    // Dry path: input → dryGain → output
+    input.connect(dryGain);
+    dryGain.connect(output);
+    
+    // Wet path: input → compressor → waveshaper → formant → lowpass → wetGain → output
+    input.connect(compressor);
+    compressor.connect(waveshaper);
+    waveshaper.connect(formantFilter);
+    formantFilter.connect(lowpass);
+    lowpass.connect(wetGain);
+    wetGain.connect(output);
+    
+    // Doubling path: lowpass → delay → delayGain → output
+    lowpass.connect(delay);
+    delay.connect(delayGain);
+    delayGain.connect(output);
+    
+    // Connect output to master
+    output.connect(this.masterGain);
+    
+    // Initialize dry (FX off)
+    dryGain.gain.value = 1;
+    wetGain.gain.value = 0;
+    
+    const chain: StemFxChain = {
+      input,
+      output,
+      dryGain,
+      wetGain,
+      compressor,
+      waveshaper,
+      formantFilter,
+      lowpass,
+      delay,
+      delayGain,
+      settings: { ...DEFAULT_FX_SETTINGS },
+    };
+    
+    this.stemFxChains.set(stemId, chain);
+    return chain;
+  }
+  
+  /**
+   * Set FX enabled/disabled for a stem (instant A/B toggle)
+   */
+  setStemFxEnabled(stemId: string, enabled: boolean): void {
+    const chain = this.stemFxChains.get(stemId);
+    if (!chain) return;
+    
+    chain.settings.enabled = enabled;
+    
+    // Crossfade between dry and wet for smooth toggle
+    const now = this.context?.currentTime ?? 0;
+    const fadeTime = 0.05; // 50ms crossfade
+    
+    if (enabled && !this._globalFxBypass) {
+      chain.dryGain.gain.setTargetAtTime(0, now, fadeTime);
+      chain.wetGain.gain.setTargetAtTime(1, now, fadeTime);
+    } else {
+      chain.dryGain.gain.setTargetAtTime(1, now, fadeTime);
+      chain.wetGain.gain.setTargetAtTime(0, now, fadeTime);
+    }
+  }
+  
+  /**
+   * Load an FX preset for a stem
+   */
+  loadStemFxPreset(stemId: string, presetName: string): void {
+    const chain = this.getOrCreateStemFxChain(stemId);
+    if (!chain) return;
+    
+    const preset = FX_PRESETS[presetName];
+    if (!preset) {
+      console.warn(`[AudioEngine] Unknown FX preset: ${presetName}`);
+      return;
+    }
+    
+    // Merge preset with defaults
+    chain.settings = { ...DEFAULT_FX_SETTINGS, ...preset, preset: presetName };
+    
+    // Apply settings
+    this.applyStemFxSettings(stemId);
+  }
+  
+  /**
+   * Apply current FX settings to a stem's chain
+   */
+  applyStemFxSettings(stemId: string): void {
+    const chain = this.stemFxChains.get(stemId);
+    if (!chain || !this.context) return;
+    
+    const s = chain.settings;
+    
+    // Compression (0-1 maps to ratio 1-12)
+    const ratio = 1 + s.compression * 11;
+    chain.compressor.ratio.value = ratio;
+    chain.compressor.threshold.value = -24 + s.compression * 12; // -24 to -12
+    
+    // Saturation
+    chain.waveshaper.curve = this.createSaturationCurve(s.saturation);
+    
+    // Formant shift (semitones to frequency shift)
+    const baseFreq = 2500;
+    const shiftedFreq = baseFreq * Math.pow(2, s.formantShift / 12);
+    chain.formantFilter.frequency.value = Math.max(500, Math.min(8000, shiftedFreq));
+    chain.formantFilter.gain.value = Math.abs(s.formantShift) * 2;
+    
+    // Bitcrushing (sample rate to lowpass cutoff)
+    const nyquist = s.bitcrushRate / 2;
+    chain.lowpass.frequency.value = Math.min(nyquist, 20000);
+    
+    // Doubling effect
+    const detuneAmount = s.doubleTrackDetune / 100; // cents to fraction
+    if (detuneAmount > 0) {
+      chain.delay.delayTime.value = 0.01 + detuneAmount * 0.02;
+      chain.delayGain.gain.value = 0.3;
+    } else {
+      chain.delayGain.gain.value = 0;
+    }
+    
+    // Enable/disable
+    this.setStemFxEnabled(stemId, s.enabled);
+  }
+  
+  /**
+   * Toggle global FX bypass (A/B comparison)
+   */
+  setGlobalFxBypass(bypass: boolean): void {
+    this._globalFxBypass = bypass;
+    
+    // Update all stem FX chains
+    for (const [stemId, chain] of this.stemFxChains) {
+      this.setStemFxEnabled(stemId, chain.settings.enabled);
+    }
+  }
+  
+  get globalFxBypass(): boolean {
+    return this._globalFxBypass;
+  }
+  
+  /**
+   * Create saturation curve for waveshaper
+   */
+  private createSaturationCurve(amount: number): Float32Array<ArrayBuffer> {
+    const samples = 44100;
+    const curve = new Float32Array(samples) as Float32Array<ArrayBuffer>;
+    
+    for (let i = 0; i < samples; i++) {
+      const x = (i * 2) / samples - 1;
+      if (amount <= 0) {
+        curve[i] = x;
+      } else {
+        const drive = 1 + amount * 10;
+        curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
+      }
+    }
+    
+    return curve;
+  }
+  
+  // =============================================================================
+  // STEM MUTE/SOLO/VOLUME
+  // =============================================================================
+  
+  /**
+   * Set mute state for a stem
+   */
+  setStemMute(stemId: string, muted: boolean): void {
+    this.stemMuteState.set(stemId, muted);
+    this.updateStemOutputGain(stemId);
+  }
+  
+  /**
+   * Set solo state for a stem
+   */
+  setStemSolo(stemId: string, soloed: boolean): void {
+    this.stemSoloState.set(stemId, soloed);
+    // Update all stems when solo changes
+    for (const id of this.stemFxChains.keys()) {
+      this.updateStemOutputGain(id);
+    }
+  }
+  
+  /**
+   * Update output gain based on mute/solo/volume state
+   */
+  private updateStemOutputGain(stemId: string): void {
+    const chain = this.stemFxChains.get(stemId);
+    if (!chain || !this.context) return;
+    
+    const muted = this.stemMuteState.get(stemId) ?? false;
+    const soloed = this.stemSoloState.get(stemId) ?? false;
+    const volume = this.stemVolumeState.get(stemId) ?? 1;
+    
+    // Check if any stem is soloed
+    const hasSolo = Array.from(this.stemSoloState.values()).some(s => s);
+    
+    // If any stem is soloed, only play soloed stems
+    const shouldMute = hasSolo ? !soloed : muted;
+    
+    const targetGain = shouldMute ? 0 : volume;
+    const now = this.context.currentTime;
+    chain.output.gain.setTargetAtTime(targetGain, now, 0.02);
+  }
+  
+  /**
+   * Get the output node for a stem (for routing audio through FX)
+   */
+  getStemFxInput(stemId: string): GainNode | null {
+    const chain = this.getOrCreateStemFxChain(stemId);
+    return chain?.input ?? null;
+  }
+  
   async close(): Promise<void> {
     if (this.initPromise) {
       try {
@@ -1171,6 +1631,17 @@ export class LoopForgeAudioEngine {
     this.stopAnalysis();
     this.stopWorklet();
     this.stopAll(0);
+    
+    // Disconnect FX chains
+    for (const chain of this.stemFxChains.values()) {
+      try {
+        chain.input.disconnect();
+        chain.output.disconnect();
+      } catch {
+        // Ignore
+      }
+    }
+    this.stemFxChains.clear();
     
     // Disconnect worklet
     if (this.schedulerWorklet) {

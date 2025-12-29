@@ -89,8 +89,11 @@ async def upload_and_process(
         raise HTTPException(400, "No filename provided")
     
     ext = Path(file.filename).suffix.lower()
-    if ext not in [".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aiff"]:
-        raise HTTPException(400, f"Unsupported format: {ext}")
+    audio_formats = [".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aiff"]
+    video_formats = [".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm"]  # iPhone videos are .mov
+    
+    if ext not in audio_formats + video_formats:
+        raise HTTPException(400, f"Unsupported format: {ext}. Supported: audio ({', '.join(audio_formats)}) and video ({', '.join(video_formats)})")
     
     db = get_db()
     storage = get_storage()
@@ -110,11 +113,70 @@ async def upload_and_process(
     
     # Save file (run blocking I/O in thread pool)
     import asyncio
+    import subprocess
     loop = asyncio.get_running_loop()
     file_path, content_hash = await loop.run_in_executor(
         None,  # Use default executor
         lambda: storage.save_upload(session_id, file.filename, file.file)
     )
+    
+    # Auto-convert video to audio if needed (iPhone MOV, MP4, etc.)
+    # Uses fast settings optimized for large files (up to 2GB)
+    is_video = ext in video_formats
+    if is_video:
+        audio_path = Path(str(file_path)).with_suffix('.mp3')
+        file_size_mb = Path(str(file_path)).stat().st_size / (1024 * 1024)
+        
+        try:
+            # Fast extraction: use mp3 for speed, copy audio codec if possible
+            # For large files (>500MB), use faster settings
+            if file_size_mb > 500:
+                # Ultra-fast: extract audio with minimal processing
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', str(file_path),
+                    '-vn',  # No video
+                    '-acodec', 'libmp3lame',
+                    '-b:a', '192k',  # Good quality, fast
+                    '-threads', '0',  # Use all CPU cores
+                    str(audio_path)
+                ]
+            else:
+                # Standard extraction for smaller files
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', str(file_path),
+                    '-vn',
+                    '-acodec', 'libmp3lame',
+                    '-b:a', '256k',
+                    str(audio_path)
+                ]
+            
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ffmpeg_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 min for large files
+                )
+            )
+            
+            if result.returncode == 0 and audio_path.exists():
+                # Update file_path to use extracted audio
+                file_path = audio_path
+                file.filename = audio_path.name
+                # Optionally delete original video to save space
+                try:
+                    Path(str(file_path)).with_suffix(ext).unlink(missing_ok=True)
+                except:
+                    pass
+            else:
+                raise HTTPException(500, f"Failed to extract audio: {result.stderr[:300]}")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(500, "Video conversion timed out")
+        except FileNotFoundError:
+            raise HTTPException(500, "ffmpeg not found")
     
     # Create source asset
     asset_id: Optional[str] = None

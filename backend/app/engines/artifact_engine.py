@@ -23,86 +23,337 @@ import librosa
 
 @dataclass
 class ArtifactPreset:
-    """Preset configuration for artifact effects."""
+    """
+    Preset configuration for artifact effects.
+    
+    Technical parameter reference:
+    - Pitch correction uses CREPE neural network for F0 detection + phase vocoder
+    - Formant shifting uses WORLD vocoder (spectral envelope warping)
+    - Bitcrushing uses dithered quantization with aliasing preservation
+    """
     name: str
-    bitcrush_rate: int              # Target sample rate (6900-44100)
-    bitcrush_depth: int             # Bit depth (8-24)
-    stutter_intensity: float        # 0.0-1.0
+    
+    # === PITCH CORRECTION (Melodyne/Auto-Tune style) ===
+    correction_strength: float      # 0.0-1.0: Pitch snap intensity (0=natural, 1=hard tune)
+    correction_speed_ms: float      # 0-100ms: Retune speed (0=instant/robotic, 50=natural)
+    preserve_vibrato: bool          # True=keep natural pitch variation, False=flatten
+    humanize_amount: float          # 0.0-1.0: Random micro-detuning for organic feel
+    
+    # === FORMANT MANIPULATION (Vocal tract modeling) ===
+    formant_shift: int              # Semitones (-24 to +24): Spectral envelope warp
+    formant_preserve: bool          # True=independent of pitch, False=linked
+    throat_length: float            # 0.5-2.0: Vocal tract length multiplier (1.0=normal)
+    
+    # === DIGITAL DEGRADATION ===
+    bitcrush_rate: int              # Target sample rate Hz (6900-44100)
+    bitcrush_depth: int             # Bit depth (8-24, lower=crunchier)
+    aliasing_mode: str              # 'none', 'mild', 'harsh': Anti-aliasing bypass
+    dither_type: str                # 'none', 'triangular', 'noise_shaped'
+    
+    # === DYNAMICS ===
+    compression_ratio: float        # 1.0-20.0: Dynamic range reduction
+    compression_threshold_db: float # -40 to 0 dB: Level where compression starts
+    compression_attack_ms: float    # 0.1-100ms: How fast compression engages
+    compression_release_ms: float   # 10-1000ms: How fast compression releases
+    saturation: float               # 0.0-1.0: Harmonic distortion amount
+    saturation_type: str            # 'tape', 'tube', 'digital', 'transistor'
+    
+    # === MODULATION ===
+    pitch_wobble: float             # 0.0-1.0: Pitch instability depth (semitones)
+    wobble_speed: float             # Hz (0.5-20): LFO rate for pitch mod
+    wobble_shape: str               # 'sine', 'random', 'drift': Modulation shape
+    
+    # === GLITCH/STUTTER ===
+    stutter_intensity: float        # 0.0-1.0: Probability of stutter events
     stutter_pattern: str            # 'random', '16th', 'triplet', 'chaos'
-    phase_smear: float              # 0.0-1.0
-    formant_shift: int              # Semitones (-24 to +24)
-    compression_ratio: float        # 1.0-20.0
-    saturation: float               # 0.0-1.0
-    pitch_wobble: float             # 0.0-1.0
-    wobble_speed: float             # Hz (0.5-20)
-    layer_corruption: float         # 0.0-1.0
+    stutter_length_ms: float        # 10-500ms: Stutter grain length
+    
+    # === SPECTRAL ===
+    phase_smear: float              # 0.0-1.0: Phase randomization (ethereal/washy)
+    spectral_freeze: float          # 0.0-1.0: Spectral sustain/drone amount
+    
+    # === LAYERING ===
+    layer_corruption: float         # 0.0-1.0: Mix with corrupted copies
+    double_track_detune: float      # 0-50 cents: Stereo doubling detune
+    
+    # Legacy defaults for backward compatibility
+    def __post_init__(self):
+        # Set defaults for new fields if not provided
+        if not hasattr(self, 'correction_strength') or self.correction_strength is None:
+            self.correction_strength = 0.8
+        if not hasattr(self, 'correction_speed_ms') or self.correction_speed_ms is None:
+            self.correction_speed_ms = 0.0
+        if not hasattr(self, 'preserve_vibrato') or self.preserve_vibrato is None:
+            self.preserve_vibrato = False
+        if not hasattr(self, 'humanize_amount') or self.humanize_amount is None:
+            self.humanize_amount = 0.0
+        if not hasattr(self, 'formant_preserve') or self.formant_preserve is None:
+            self.formant_preserve = True
+        if not hasattr(self, 'throat_length') or self.throat_length is None:
+            self.throat_length = 1.0
+        if not hasattr(self, 'aliasing_mode') or self.aliasing_mode is None:
+            self.aliasing_mode = 'none'
+        if not hasattr(self, 'dither_type') or self.dither_type is None:
+            self.dither_type = 'triangular'
+        if not hasattr(self, 'compression_threshold_db') or self.compression_threshold_db is None:
+            self.compression_threshold_db = -20.0
+        if not hasattr(self, 'compression_attack_ms') or self.compression_attack_ms is None:
+            self.compression_attack_ms = 5.0
+        if not hasattr(self, 'compression_release_ms') or self.compression_release_ms is None:
+            self.compression_release_ms = 50.0
+        if not hasattr(self, 'saturation_type') or self.saturation_type is None:
+            self.saturation_type = 'tape'
+        if not hasattr(self, 'wobble_shape') or self.wobble_shape is None:
+            self.wobble_shape = 'sine'
+        if not hasattr(self, 'stutter_length_ms') or self.stutter_length_ms is None:
+            self.stutter_length_ms = 50.0
+        if not hasattr(self, 'spectral_freeze') or self.spectral_freeze is None:
+            self.spectral_freeze = 0.0
+        if not hasattr(self, 'double_track_detune') or self.double_track_detune is None:
+            self.double_track_detune = 0.0
     
     @staticmethod
     def bladee_classic() -> 'ArtifactPreset':
+        """
+        Whitearmor/Gud production style (Drain Gang 2016-2020)
+        
+        Based on known techniques:
+        - Hard Melodyne pitch correction with instant retune
+        - Subtle formant raise (+2-3 semitones) for ethereal quality
+        - Clean digital sound (no heavy lo-fi)
+        - Heavy OTT-style multiband compression
+        - Moderate saturation for warmth
+        - Minimal effects - the "less is more" approach
+        
+        Reference tracks: Gluee, Eversince, Red Light era
+        """
         return ArtifactPreset(
-            name="Bladee Classic",
-            bitcrush_rate=22050,
-            bitcrush_depth=16,
-            stutter_intensity=0.2,
-            stutter_pattern='16th',
-            phase_smear=0.3,
-            formant_shift=3,
-            compression_ratio=8.0,
-            saturation=0.4,
-            pitch_wobble=0.15,
-            wobble_speed=4.0,
-            layer_corruption=0.3
+            name="Bladee/Whitearmor",
+            # Pitch: Hard correction, instant retune (robotic but clean)
+            correction_strength=0.95,
+            correction_speed_ms=0.0,  # Instant - the signature "hard tune"
+            preserve_vibrato=False,   # Flatten everything
+            humanize_amount=0.02,     # Tiny bit of life
+            # Formants: Subtle raise for that "angelic" quality
+            formant_shift=2,          # +2 semitones (not extreme)
+            formant_preserve=True,
+            throat_length=0.92,       # Slightly shorter = brighter
+            # Digital: Clean, not crushed
+            bitcrush_rate=44100,      # Full quality
+            bitcrush_depth=24,        # No crushing
+            aliasing_mode='none',
+            dither_type='none',
+            # Dynamics: Heavy but transparent compression
+            compression_ratio=6.0,
+            compression_threshold_db=-18.0,
+            compression_attack_ms=2.0,
+            compression_release_ms=80.0,
+            saturation=0.25,          # Subtle warmth
+            saturation_type='tape',
+            # Modulation: Almost none - clean pitch
+            pitch_wobble=0.0,
+            wobble_speed=0.0,
+            wobble_shape='sine',
+            # Glitch: Not characteristic
+            stutter_intensity=0.0,
+            stutter_pattern='random',
+            stutter_length_ms=50.0,
+            # Spectral: Clean
+            phase_smear=0.0,
+            spectral_freeze=0.0,
+            # Layering: Subtle doubling
+            layer_corruption=0.0,
+            double_track_detune=8.0   # 8 cents for width
         )
     
     @staticmethod
     def glitch_artifact() -> 'ArtifactPreset':
+        """
+        Aggressive glitch/IDM style (Arca, SOPHIE, PC Music)
+        
+        Heavy digital destruction with rhythmic stutter.
+        """
         return ArtifactPreset(
-            name="Glitch Artifact",
+            name="Glitch/Hyperpop",
+            correction_strength=1.0,
+            correction_speed_ms=0.0,
+            preserve_vibrato=False,
+            humanize_amount=0.0,
+            formant_shift=-5,         # Lower = aggressive
+            formant_preserve=True,
+            throat_length=1.3,        # Longer = darker
             bitcrush_rate=11025,
             bitcrush_depth=12,
-            stutter_intensity=0.6,
-            stutter_pattern='chaos',
-            phase_smear=0.5,
-            formant_shift=-5,
+            aliasing_mode='harsh',
+            dither_type='none',
             compression_ratio=12.0,
+            compression_threshold_db=-25.0,
+            compression_attack_ms=0.5,
+            compression_release_ms=30.0,
             saturation=0.6,
+            saturation_type='digital',
             pitch_wobble=0.3,
             wobble_speed=8.0,
-            layer_corruption=0.5
+            wobble_shape='random',
+            stutter_intensity=0.6,
+            stutter_pattern='chaos',
+            stutter_length_ms=30.0,
+            phase_smear=0.5,
+            spectral_freeze=0.2,
+            layer_corruption=0.5,
+            double_track_detune=25.0
         )
     
     @staticmethod
     def digital_decay() -> 'ArtifactPreset':
+        """
+        Lo-fi degradation style (Burial, early Yung Lean)
+        
+        Nostalgic digital artifacts, tape-like degradation.
+        """
         return ArtifactPreset(
-            name="Digital Decay",
+            name="Lo-Fi Decay",
+            correction_strength=0.5,  # Looser correction
+            correction_speed_ms=25.0, # Slower = more natural
+            preserve_vibrato=True,
+            humanize_amount=0.15,
+            formant_shift=0,
+            formant_preserve=True,
+            throat_length=1.0,
             bitcrush_rate=8000,
             bitcrush_depth=8,
-            stutter_intensity=0.1,
-            stutter_pattern='random',
-            phase_smear=0.7,
-            formant_shift=0,
+            aliasing_mode='mild',
+            dither_type='triangular',
             compression_ratio=4.0,
+            compression_threshold_db=-15.0,
+            compression_attack_ms=10.0,
+            compression_release_ms=150.0,
             saturation=0.8,
+            saturation_type='tape',
             pitch_wobble=0.4,
             wobble_speed=2.0,
-            layer_corruption=0.6
+            wobble_shape='drift',
+            stutter_intensity=0.1,
+            stutter_pattern='random',
+            stutter_length_ms=80.0,
+            phase_smear=0.7,
+            spectral_freeze=0.3,
+            layer_corruption=0.6,
+            double_track_detune=15.0
         )
     
     @staticmethod
     def ghost_voice() -> 'ArtifactPreset':
+        """
+        Ethereal/ambient style (James Blake, Bon Iver, FKA twigs)
+        
+        Otherworldly, formant-shifted, layered textures.
+        """
         return ArtifactPreset(
-            name="Ghost Voice",
+            name="Ethereal/Ghost",
+            correction_strength=0.7,
+            correction_speed_ms=15.0,
+            preserve_vibrato=True,
+            humanize_amount=0.1,
+            formant_shift=7,          # High shift = otherworldly
+            formant_preserve=True,
+            throat_length=0.75,       # Very short = bright/thin
             bitcrush_rate=44100,
             bitcrush_depth=24,
-            stutter_intensity=0.0,
-            stutter_pattern='random',
-            phase_smear=0.8,
-            formant_shift=7,
+            aliasing_mode='none',
+            dither_type='noise_shaped',
             compression_ratio=2.0,
+            compression_threshold_db=-12.0,
+            compression_attack_ms=15.0,
+            compression_release_ms=200.0,
             saturation=0.2,
+            saturation_type='tube',
             pitch_wobble=0.5,
             wobble_speed=1.5,
-            layer_corruption=0.7
+            wobble_shape='drift',
+            stutter_intensity=0.0,
+            stutter_pattern='random',
+            stutter_length_ms=50.0,
+            phase_smear=0.8,
+            spectral_freeze=0.4,
+            layer_corruption=0.7,
+            double_track_detune=12.0
+        )
+    
+    @staticmethod
+    def yeat_rage() -> 'ArtifactPreset':
+        """
+        Modern rage/trap style (Yeat, Ken Carson, Destroy Lonely)
+        
+        Aggressive pitch correction with subtle formant tweaks.
+        """
+        return ArtifactPreset(
+            name="Rage/Yeat",
+            correction_strength=1.0,
+            correction_speed_ms=0.0,  # Instant
+            preserve_vibrato=False,
+            humanize_amount=0.0,
+            formant_shift=-2,         # Slight drop = darker
+            formant_preserve=True,
+            throat_length=1.1,
+            bitcrush_rate=44100,
+            bitcrush_depth=24,
+            aliasing_mode='none',
+            dither_type='none',
+            compression_ratio=10.0,
+            compression_threshold_db=-22.0,
+            compression_attack_ms=1.0,
+            compression_release_ms=40.0,
+            saturation=0.35,
+            saturation_type='transistor',
+            pitch_wobble=0.0,
+            wobble_speed=0.0,
+            wobble_shape='sine',
+            stutter_intensity=0.0,
+            stutter_pattern='random',
+            stutter_length_ms=50.0,
+            phase_smear=0.0,
+            spectral_freeze=0.0,
+            layer_corruption=0.1,
+            double_track_detune=5.0
+        )
+    
+    @staticmethod
+    def autechre_granular() -> 'ArtifactPreset':
+        """
+        Experimental/IDM style (Autechre, Aphex Twin)
+        
+        Granular destruction, spectral freezing, chaotic modulation.
+        """
+        return ArtifactPreset(
+            name="Granular/IDM",
+            correction_strength=0.3,  # Loose
+            correction_speed_ms=50.0,
+            preserve_vibrato=True,
+            humanize_amount=0.3,
+            formant_shift=0,
+            formant_preserve=False,   # Let it drift
+            throat_length=1.0,
+            bitcrush_rate=16000,
+            bitcrush_depth=10,
+            aliasing_mode='harsh',
+            dither_type='triangular',
+            compression_ratio=3.0,
+            compression_threshold_db=-30.0,
+            compression_attack_ms=0.1,
+            compression_release_ms=500.0,
+            saturation=0.4,
+            saturation_type='digital',
+            pitch_wobble=0.6,
+            wobble_speed=12.0,
+            wobble_shape='random',
+            stutter_intensity=0.8,
+            stutter_pattern='chaos',
+            stutter_length_ms=15.0,
+            phase_smear=0.6,
+            spectral_freeze=0.5,
+            layer_corruption=0.8,
+            double_track_detune=40.0
         )
 
 
@@ -122,6 +373,8 @@ class ArtifactEngine:
         'glitch_artifact': ArtifactPreset.glitch_artifact,
         'digital_decay': ArtifactPreset.digital_decay,
         'ghost_voice': ArtifactPreset.ghost_voice,
+        'yeat_rage': ArtifactPreset.yeat_rage,
+        'autechre_granular': ArtifactPreset.autechre_granular,
     }
     
     def __init__(self, sr: int = 44100):

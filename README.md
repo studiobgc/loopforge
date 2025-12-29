@@ -20,14 +20,38 @@ npm install
 # Start backend (terminal 1)
 cd backend
 source venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main_v2:app --reload --host 0.0.0.0 --port 8000
 
 # Start frontend (terminal 2)
 cd frontend
 npm run dev
 ```
 
-Open http://localhost:3001
+Open http://loopforge.local:3001
+
+### Local Domain Setup
+
+Add to `/etc/hosts`:
+```
+127.0.0.1 loopforge.local
+```
+
+### Remote Access (Tailscale)
+
+Access LoopForge securely from anywhere — phone on cellular, laptop at coffee shop, etc.
+
+```bash
+# One-time setup
+./scripts/setup-tailscale.sh
+```
+
+Or manually:
+1. Install [Tailscale](https://tailscale.com/download) on your Mac
+2. Install Tailscale on your phone/other devices
+3. Log in with the same account on all devices
+4. Access via your Tailscale IP: `http://100.x.x.x:3001`
+
+**Security**: End-to-end encrypted, only YOUR devices can access.
 
 ## Features
 

@@ -1,0 +1,1 @@
+export { RichPad } from './RichPad';

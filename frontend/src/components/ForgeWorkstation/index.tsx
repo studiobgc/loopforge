@@ -218,10 +218,6 @@ export const ForgeWorkstation: React.FC = () => {
               if (bank && searchQuery) {
                 const results = await pads.searchByText(bank.id, searchQuery);
                 setSearchResults(results);
-                // Highlight matching pads by updating their order/visibility
-                if (results.length > 0) {
-                  console.log(`Found ${results.length} matches for "${searchQuery}"`);
-                }
               }
             }}
           >

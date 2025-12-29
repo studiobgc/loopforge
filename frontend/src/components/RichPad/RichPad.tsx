@@ -4,13 +4,7 @@
 
 import React, { useRef, useEffect } from 'react';
 import type { PadData } from '../ForgeWorkstation/hooks/usePads';
-
-const STEM_COLORS: Record<string, string> = {
-  drums: '#e07020',
-  bass: '#8060c0',
-  vocals: '#40a0e0',
-  other: '#60b060',
-};
+import { STEM_COLORS } from '../../design/constants';
 
 interface RichPadProps {
   data: PadData;

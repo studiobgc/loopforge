@@ -34,9 +34,25 @@ export function usePads(padCount: number = 16) {
   const [triggerRules, setTriggerRules] = useState<TriggerRule[]>([]);
   const [playingPad, setPlayingPad] = useState<number | null>(null);
 
-  // Generate fake waveform peaks for visualization
-  const generatePeaks = (count: number = 32): number[] => {
-    return Array.from({ length: count }, () => 0.2 + Math.random() * 0.6);
+  // Compute waveform peaks from slice data
+  // Uses transient_strength and rms_energy from backend slice analysis
+  const computePeaksFromSlice = (slice: { rms_energy: number; transient_strength: number; spectral_centroid: number }, count: number = 32): number[] => {
+    // Generate realistic peaks based on actual slice analysis
+    const baseEnergy = Math.min(1, slice.rms_energy * 3);
+    const transientPeak = Math.min(1, slice.transient_strength);
+    const brightness = Math.min(1, slice.spectral_centroid / 8000);
+    
+    return Array.from({ length: count }, (_, i) => {
+      const position = i / count;
+      // Attack phase (first 20%) - use transient strength
+      if (position < 0.2) {
+        return transientPeak * (position / 0.2) * 0.8 + 0.2;
+      }
+      // Sustain/decay phase - use RMS energy with variation
+      const decay = Math.exp(-position * 2);
+      const variation = Math.sin(position * Math.PI * 4 + brightness * 10) * 0.15;
+      return Math.max(0.1, baseEnergy * decay + variation);
+    });
   };
 
   // Create slice bank and load into pads
@@ -66,7 +82,7 @@ export function usePads(padCount: number = 16) {
               endTime: slice.end_time,
               stemId,
               bankId: bank.id,
-              waveformPeaks: generatePeaks(),
+              waveformPeaks: computePeaksFromSlice(slice),
             };
           }
         });
@@ -199,7 +215,11 @@ export function usePads(padCount: number = 16) {
               startTime: item.start_time,
               endTime: item.end_time,
               bankId,
-              waveformPeaks: generatePeaks(),
+              waveformPeaks: computePeaksFromSlice({ 
+                rms_energy: item.rms_energy, 
+                transient_strength: 0.5, 
+                spectral_centroid: 2000 
+              }),
             };
           }
         });

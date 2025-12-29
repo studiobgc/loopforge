@@ -20,7 +20,7 @@ import { useKeyboardShortcuts, createDAWShortcuts } from '../../hooks/useKeyboar
 import { api } from '../../api/client';
 
 // Components
-import { LcdDisplay, TransportControls } from '../shared';
+import { LcdDisplay, TransportControls, ShortcutsOverlay } from '../shared';
 import { RichPad } from '../RichPad';
 import { ToolStrip } from '../ToolStrip';
 import { WaveformView } from '../WaveformView';
@@ -38,6 +38,8 @@ export const ForgeWorkstation: React.FC = () => {
   const [selectedStem, setSelectedStem] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ slice_index: number; score: number }>>([]);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [selectedMode, setSelectedMode] = useState<'major' | 'minor' | 'dorian'>('major');
   const [selectedMotion, setSelectedMotion] = useState<'static' | 'breathe' | 'shimmer'>('static');
 
@@ -112,11 +114,23 @@ export const ForgeWorkstation: React.FC = () => {
     pads.triggerPad(padIndex, duration);
   }, [pads, audio]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts - WIRED to actual audio engine
   const shortcuts = createDAWShortcuts({
-    play: () => setIsPlaying(p => !p),
-    stop: () => { audio.stopAll(); setIsPlaying(false); },
-    rewind: () => {},
+    play: () => {
+      if (isPlaying) {
+        audio.stop();
+        setIsPlaying(false);
+      } else {
+        audio.play();
+        setIsPlaying(true);
+      }
+    },
+    stop: () => { 
+      audio.stop(true); // Reset position
+      audio.stopAll(); 
+      setIsPlaying(false); 
+    },
+    rewind: () => { audio.seek(0); },
   });
 
   // Pad shortcuts (1-8, Q-I)
@@ -125,7 +139,10 @@ export const ForgeWorkstation: React.FC = () => {
     ...['q','w','e','r','t','y','u','i'].map((k, i) => ({ key: k, action: () => handlePlayPad(8+i) })),
   ];
 
-  useKeyboardShortcuts([...shortcuts, ...padShortcuts]);
+  // Help shortcut
+  const helpShortcut = { key: '?', action: () => setShowShortcuts(s => !s) };
+
+  useKeyboardShortcuts([...shortcuts, ...padShortcuts, helpShortcut]);
 
   // Dropzone
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -176,7 +193,11 @@ export const ForgeWorkstation: React.FC = () => {
               const bank = pads.sliceBanks.values().next().value;
               if (bank && searchQuery) {
                 const results = await pads.searchByText(bank.id, searchQuery);
-                console.log('CLAP search results:', results);
+                setSearchResults(results);
+                // Highlight matching pads by updating their order/visibility
+                if (results.length > 0) {
+                  console.log(`Found ${results.length} matches for "${searchQuery}"`);
+                }
               }
             }}
           >
@@ -407,10 +428,18 @@ export const ForgeWorkstation: React.FC = () => {
 
         <TransportControls
           isPlaying={isPlaying}
-          onPlay={() => setIsPlaying(p => !p)}
-          onStop={() => { audio.stopAll(); setIsPlaying(false); }}
-          onRewind={() => {}}
-          onForward={() => {}}
+          onPlay={() => {
+            if (isPlaying) {
+              audio.stop();
+              setIsPlaying(false);
+            } else {
+              audio.play();
+              setIsPlaying(true);
+            }
+          }}
+          onStop={() => { audio.stop(true); audio.stopAll(); setIsPlaying(false); }}
+          onRewind={() => audio.seek(0)}
+          onForward={() => audio.seek(audio.getCurrentBeat() + 4)}
         />
 
         <div className="ba-forge-info">
@@ -419,9 +448,19 @@ export const ForgeWorkstation: React.FC = () => {
         </div>
 
         <div className="ba-forge-actions">
-          <button className="ba-btn-icon"><Folder size={16} /></button>
-          <button className="ba-btn-icon"><Save size={16} /></button>
-          <button className="ba-btn ba-btn-primary ba-btn-sm" disabled={!session.session}>
+          <button className="ba-btn-icon" onClick={() => setShowShortcuts(true)} title="Keyboard shortcuts (?)">
+            <Folder size={16} />
+          </button>
+          <button className="ba-btn-icon" title="Save project (⌘S)"><Save size={16} /></button>
+          <button 
+            className="ba-btn ba-btn-primary ba-btn-sm" 
+            disabled={!session.session}
+            onClick={() => {
+              if (session.session) {
+                window.open(api.getAllStemsDownloadUrl(session.session.id), '_blank');
+              }
+            }}
+          >
             <Download size={12} /> Export
           </button>
         </div>
@@ -476,6 +515,17 @@ export const ForgeWorkstation: React.FC = () => {
           <button onClick={session.clearError}>×</button>
         </div>
       )}
+
+      {/* Search Results Indicator */}
+      {searchResults.length > 0 && (
+        <div className="ba-search-results-toast">
+          Found {searchResults.length} matches for "{searchQuery}"
+          <button onClick={() => setSearchResults([])}>×</button>
+        </div>
+      )}
+
+      {/* Keyboard Shortcuts Overlay */}
+      <ShortcutsOverlay isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
   );
 };

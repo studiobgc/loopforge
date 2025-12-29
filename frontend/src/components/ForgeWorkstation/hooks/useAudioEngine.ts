@@ -98,6 +98,25 @@ export function useAudioEngine() {
     return engine.isBankReady(bankId);
   }, [engine]);
 
+  // Transport controls
+  const play = useCallback(() => {
+    engine.play();
+    setState(s => ({ ...s, isPlaying: true }));
+  }, [engine]);
+
+  const stop = useCallback((resetPosition = false) => {
+    engine.stop(resetPosition);
+    setState(s => ({ ...s, isPlaying: false }));
+  }, [engine]);
+
+  const seek = useCallback((beat: number) => {
+    engine.seek(beat);
+  }, [engine]);
+
+  const getCurrentBeat = useCallback((): number => {
+    return engine.getCurrentBeat();
+  }, [engine]);
+
   // Mute/Solo controls
   const setStemMute = useCallback((stemId: string, muted: boolean) => {
     engine.setStemMute(stemId, muted);
@@ -123,6 +142,11 @@ export function useAudioEngine() {
     isBankReady,
     setStemMute,
     setStemSolo,
+    // Transport
+    play,
+    stop,
+    seek,
+    getCurrentBeat,
     engine,
   };
 }

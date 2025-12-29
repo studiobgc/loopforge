@@ -5,13 +5,9 @@
 import React from 'react';
 import { Upload } from 'lucide-react';
 import type { Session, Moment } from '../../api/client';
-
-const STEM_COLORS: Record<string, string> = {
-  drums: '#e07020',
-  bass: '#8060c0',
-  vocals: '#40a0e0',
-  other: '#60b060',
-};
+import { api } from '../../api/client';
+import { WaveformCanvas } from './WaveformCanvas';
+import { STEM_COLORS, MOMENT_COLORS } from '../../design/constants';
 
 interface WaveformViewProps {
   session: Session | null;
@@ -95,11 +91,10 @@ export const WaveformView: React.FC<WaveformViewProps> = ({
               {stem.name}
             </div>
             <div className="ba-lane-waveform">
-              <div 
-                className="ba-lane-placeholder" 
-                style={{ 
-                  background: `linear-gradient(90deg, ${STEM_COLORS[stem.name] || '#888'}40 0%, ${STEM_COLORS[stem.name] || '#888'}20 100%)`
-                }} 
+              <WaveformCanvas
+                peaksUrl={session ? api.getStemDownloadUrl(session.id, stem.name).replace('/download/', '/peaks/') : null}
+                color={STEM_COLORS[stem.name] || '#888'}
+                height={50}
               />
             </div>
           </div>
@@ -116,9 +111,7 @@ export const WaveformView: React.FC<WaveformViewProps> = ({
               style={{
                 left: `${(m.start / duration) * 100}%`,
                 width: `${((m.end - m.start) / duration) * 100}%`,
-                backgroundColor: m.type === 'hit' ? '#e07020' : 
-                                 m.type === 'phrase' ? '#40a0e0' : 
-                                 m.type === 'texture' ? '#8060c0' : '#60b060',
+                backgroundColor: MOMENT_COLORS[m.type] || MOMENT_COLORS.change,
               }}
               title={m.label}
             />

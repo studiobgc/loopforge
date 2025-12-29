@@ -202,3 +202,41 @@ async def get_source_peaks(session_id: str):
             media_type="application/octet-stream",
             filename=f"{asset.filename}.dat",
         )
+
+
+@router.get("/session/{session_id}/peaks/{stem_name}")
+async def get_stem_peaks_json(session_id: str, stem_name: str, samples: int = 200):
+    """Get waveform peaks for a stem as JSON (for lightweight canvas rendering)"""
+    import numpy as np
+    import soundfile as sf
+    
+    storage = get_storage()
+    stems = storage.get_stems(session_id)
+    
+    if stem_name not in stems:
+        raise HTTPException(404, f"Stem '{stem_name}' not found")
+    
+    file_path = stems[stem_name]
+    
+    try:
+        # Read audio and compute peaks
+        audio, sr = sf.read(str(file_path))
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)  # Mono
+        
+        # Downsample to requested number of samples
+        chunk_size = max(1, len(audio) // samples)
+        peaks = []
+        for i in range(0, len(audio), chunk_size):
+            chunk = audio[i:i + chunk_size]
+            if len(chunk) > 0:
+                peaks.append(float(np.abs(chunk).max()))
+        
+        # Normalize
+        max_peak = max(peaks) if peaks else 1
+        if max_peak > 0:
+            peaks = [p / max_peak for p in peaks]
+        
+        return {"peaks": peaks[:samples], "sample_rate": sr, "duration": len(audio) / sr}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to compute peaks: {str(e)}")

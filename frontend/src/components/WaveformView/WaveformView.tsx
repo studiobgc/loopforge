@@ -5,7 +5,6 @@
 import React from 'react';
 import { Upload } from 'lucide-react';
 import type { Session, Moment } from '../../api/client';
-import { api } from '../../api/client';
 import { WaveformCanvas } from './WaveformCanvas';
 import { STEM_COLORS, MOMENT_COLORS } from '../../design/constants';
 
@@ -92,7 +91,7 @@ export const WaveformView: React.FC<WaveformViewProps> = ({
             </div>
             <div className="ba-lane-waveform">
               <WaveformCanvas
-                peaksUrl={session ? api.getStemDownloadUrl(session.id, stem.name).replace('/download/', '/peaks/') : null}
+                peaksUrl={session ? `/api/assets/session/${session.id}/peaks/${stem.name}` : null}
                 color={STEM_COLORS[stem.name] || '#888'}
                 height={50}
               />

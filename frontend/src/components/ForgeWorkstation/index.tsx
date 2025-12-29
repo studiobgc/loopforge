@@ -25,6 +25,8 @@ import { RichPad } from '../RichPad';
 import { ToolStrip } from '../ToolStrip';
 import { WaveformView } from '../WaveformView';
 import { Sequencer } from '../Sequencer';
+import { JobQueue } from '../JobQueue';
+import { RegionSelector } from '../RegionSelector';
 
 export const ForgeWorkstation: React.FC = () => {
   // Hooks - ALL wired up
@@ -42,6 +44,28 @@ export const ForgeWorkstation: React.FC = () => {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [selectedMode, setSelectedMode] = useState<'major' | 'minor' | 'dorian'>('major');
   const [selectedMotion, setSelectedMotion] = useState<'static' | 'breathe' | 'shimmer'>('static');
+  const [selectedRegion, setSelectedRegion] = useState<{ start: number; end: number } | null>(null);
+
+  // Session restore on mount
+  useEffect(() => {
+    const lastSessionId = localStorage.getItem('loopforge_last_session');
+    if (lastSessionId) {
+      session.loadSession(lastSessionId).then(sess => {
+        if (sess) {
+          setSelectedStem(sess.stems[0]?.name || null);
+        }
+      }).catch(() => {
+        localStorage.removeItem('loopforge_last_session');
+      });
+    }
+  }, []);
+
+  // Save session ID when it changes
+  useEffect(() => {
+    if (session.session?.id) {
+      localStorage.setItem('loopforge_last_session', session.session.id);
+    }
+  }, [session.session?.id]);
 
   // Backend health check
   useEffect(() => {
@@ -526,6 +550,41 @@ export const ForgeWorkstation: React.FC = () => {
 
       {/* Keyboard Shortcuts Overlay */}
       <ShortcutsOverlay isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
+      {/* Job Queue */}
+      <JobQueue 
+        sessionId={session.session?.id || null}
+        onJobComplete={(job) => {
+          if (job.job_type === 'separation' && session.session) {
+            session.loadSession(session.session.id);
+          }
+        }}
+      />
+
+      {/* Region Selection (shown when session active) */}
+      {session.session && selectedRegion && (
+        <div className="ba-region-panel">
+          <RegionSelector
+            duration={session.session.duration_seconds || 60}
+            onRegionSelect={(start, end) => setSelectedRegion({ start, end })}
+            onSliceRegion={async (start, end) => {
+              if (session.session && selectedStem) {
+                const stem = session.session.stems.find(s => s.name === selectedStem);
+                if (stem) {
+                  await api.createRegionSlices({
+                    sessionId: session.session.id,
+                    audioPath: stem.path,
+                    startTime: start,
+                    endTime: end,
+                    role: selectedStem,
+                  });
+                  setSelectedRegion(null);
+                }
+              }
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
